@@ -2152,181 +2152,329 @@ function parseAiBriefing_(briefing) {
   return sections;
 }
 
+// ============================================================================
+// SLIDE STYLING CONSTANTS
+// ============================================================================
+var SLIDE_THEME = {
+  colors: {
+    primary: '#1a73e8',      // Google Blue
+    secondary: '#34a853',    // Success Green
+    accent: '#fbbc04',       // Warning Yellow
+    danger: '#ea4335',       // Error Red
+    dark: '#202124',         // Dark text
+    light: '#5f6368',        // Light text
+    background: '#f8f9fa'    // Light background
+  },
+  fonts: {
+    title: 'Montserrat',
+    body: 'Roboto',
+    mono: 'Roboto Mono'
+  },
+  sizes: {
+    titleLarge: 32,
+    titleMedium: 24,
+    titleSmall: 18,
+    bodyLarge: 14,
+    bodyMedium: 12,
+    bodySmall: 10
+  }
+};
+
 /**
- * Forside slide
+ * Apply professional styling to text
+ */
+function styleText_(textRange, options) {
+  var style = textRange.getTextStyle();
+  
+  if (options.color) {
+    style.setForegroundColor(options.color);
+  }
+  if (options.fontSize) {
+    style.setFontSize(options.fontSize);
+  }
+  if (options.fontFamily) {
+    style.setFontFamily(options.fontFamily);
+  }
+  if (options.bold !== undefined) {
+    style.setBold(options.bold);
+  }
+  if (options.italic !== undefined) {
+    style.setItalic(options.italic);
+  }
+  
+  return style;
+}
+
+/**
+ * Apply background color to slide
+ */
+function setSlideBackground_(slide, color) {
+  var background = slide.getBackground();
+  var solidFill = background.getSolidFill();
+  if (!solidFill) {
+    solidFill = background.setSolidFill(color);
+  } else {
+    solidFill.setColor(color);
+  }
+}
+
+/**
+ * Forside slide - Clean, professional title
  */
 function createTitleSlide_(presentation, data, aiSections) {
-  var slide = presentation.appendSlide(SlidesApp.PredefinedLayout.TITLE);
-  var shapes = slide.getShapes();
+  var slide = presentation.appendSlide(SlidesApp.PredefinedLayout.BLANK);
   
-  // Titel
-  shapes[0].getText().setText('Sales Pitch');
+  // Set gradient-like background with primary color
+  setSlideBackground_(slide, SLIDE_THEME.colors.primary);
   
-  // Undertitel
-  var subtitle = data.domain.toUpperCase();
-  if (data.cvr) subtitle += '\nCVR: ' + data.cvr;
-  shapes[1].getText().setText(subtitle);
+  // Main title
+  var titleBox = slide.insertTextBox('AutoUncle Sales Pitch', 50, 150, 600, 80);
+  var titleText = titleBox.getText();
+  styleText_(titleText, {
+    color: '#FFFFFF',
+    fontSize: SLIDE_THEME.sizes.titleLarge,
+    fontFamily: SLIDE_THEME.fonts.title,
+    bold: true
+  });
+  titleText.getParagraphStyle().setParagraphAlignment(SlidesApp.ParagraphAlignment.CENTER);
+  
+  // Subtitle with company name
+  var subtitleBox = slide.insertTextBox(data.domain.toUpperCase(), 50, 250, 600, 60);
+  var subtitleText = subtitleBox.getText();
+  styleText_(subtitleText, {
+    color: '#E8F0FE',
+    fontSize: SLIDE_THEME.sizes.titleMedium,
+    fontFamily: SLIDE_THEME.fonts.body,
+    bold: false
+  });
+  subtitleText.getParagraphStyle().setParagraphAlignment(SlidesApp.ParagraphAlignment.CENTER);
+  
+  // Date and CVR footer
+  var footerText = new Date().toLocaleDateString('da-DK');
+  if (data.cvr) footerText += ' • CVR: ' + data.cvr;
+  var footerBox = slide.insertTextBox(footerText, 50, 480, 600, 30);
+  var footer = footerBox.getText();
+  styleText_(footer, {
+    color: '#B8D4FE',
+    fontSize: SLIDE_THEME.sizes.bodySmall,
+    fontFamily: SLIDE_THEME.fonts.body
+  });
+  footer.getParagraphStyle().setParagraphAlignment(SlidesApp.ParagraphAlignment.CENTER);
 }
 
 /**
- * Virksomhedsinfo slide - bruger AI COMPANY OVERVIEW
+ * Virksomhedsinfo slide - AI analysis focused, minimal raw data redundancy
  */
 function createCompanyInfoSlide_(presentation, data, aiSections) {
-  var slide = presentation.appendSlide(SlidesApp.PredefinedLayout.TITLE_AND_BODY);
-  var shapes = slide.getShapes();
+  var slide = presentation.appendSlide(SlidesApp.PredefinedLayout.BLANK);
+  setSlideBackground_(slide, '#FFFFFF');
   
-  shapes[0].getText().setText('Virksomhedsinfo');
+  // Title
+  var titleBox = slide.insertTextBox('Virksomhedsprofil', 40, 30, 620, 50);
+  styleText_(titleBox.getText(), {
+    color: SLIDE_THEME.colors.primary,
+    fontSize: SLIDE_THEME.sizes.titleMedium,
+    fontFamily: SLIDE_THEME.fonts.title,
+    bold: true
+  });
   
-  var content = '';
-  
-  // Brug AI overview hvis tilgængelig
+  // AI Analysis (main content - no redundancy)
   if (aiSections.overview) {
-    content += '🤖 AI ANALYSE:\n' + aiSections.overview + '\n\n';
+    var analysisBox = slide.insertTextBox(aiSections.overview, 40, 100, 620, 300);
+    var analysisText = analysisBox.getText();
+    styleText_(analysisText, {
+      color: SLIDE_THEME.colors.dark,
+      fontSize: SLIDE_THEME.sizes.bodyLarge,
+      fontFamily: SLIDE_THEME.fonts.body
+    });
+    analysisText.getParagraphStyle().setLineSpacing(120);
   }
   
-  // Tilføj nøgledata
-  content += '📊 KONTAKTDATA:\n';
-  if (data.domain) content += '🌐 ' + data.domain + '\n';
-  if (data.cvr) content += '🏢 CVR: ' + data.cvr + '\n';
-  if (data.phone) content += '📞 ' + data.phone + '\n';
-  if (data.email) content += '✉️ ' + data.email + '\n';
+  // Contact footer (compact, only essentials not already in AI)
+  var contactInfo = [];
+  if (data.phone) contactInfo.push('📞 ' + data.phone);
+  if (data.email) contactInfo.push('✉️ ' + data.email);
   
-  if (data.websitePlatform || data.carDealerPlatform) {
-    content += '\n💻 PLATFORM:\n';
-    if (data.carDealerPlatform) content += '🚗 ' + data.carDealerPlatform + '\n';
-    else if (data.websitePlatform) content += '🌐 ' + data.websitePlatform + '\n';
+  if (contactInfo.length > 0) {
+    var contactBox = slide.insertTextBox(contactInfo.join('  •  '), 40, 450, 620, 40);
+    styleText_(contactBox.getText(), {
+      color: SLIDE_THEME.colors.light,
+      fontSize: SLIDE_THEME.sizes.bodySmall,
+      fontFamily: SLIDE_THEME.fonts.body
+    });
   }
-  
-  shapes[1].getText().setText(content || 'Ingen data tilgængelig');
 }
 
 /**
- * Digital modenhed slide - bruger AI DIGITAL MODNING
+ * Digital modenhed slide - AI primary, visual status bar (no redundant lists)
  */
 function createDigitalMaturitySlide_(presentation, data, aiSections) {
-  var slide = presentation.appendSlide(SlidesApp.PredefinedLayout.TITLE_AND_BODY);
-  var shapes = slide.getShapes();
+  var slide = presentation.appendSlide(SlidesApp.PredefinedLayout.BLANK);
+  setSlideBackground_(slide, '#FFFFFF');
   
-  shapes[0].getText().setText('Digital Modenhed');
+  // Title
+  var titleBox = slide.insertTextBox('Digital Modenhed', 40, 30, 620, 50);
+  styleText_(titleBox.getText(), {
+    color: SLIDE_THEME.colors.primary,
+    fontSize: SLIDE_THEME.sizes.titleMedium,
+    fontFamily: SLIDE_THEME.fonts.title,
+    bold: true
+  });
   
-  var content = '';
-  
-  // Brug AI's digital maturity vurdering hvis tilgængelig
+  // AI Analysis (main content)
   if (aiSections.digital) {
-    content += '🤖 AI VURDERING:\n' + aiSections.digital + '\n\n';
+    var analysisBox = slide.insertTextBox(aiSections.digital, 40, 100, 620, 280);
+    styleText_(analysisBox.getText(), {
+      color: SLIDE_THEME.colors.dark,
+      fontSize: SLIDE_THEME.sizes.bodyLarge,
+      fontFamily: SLIDE_THEME.fonts.body
+    });
   }
   
-  // Tilføj quick facts
-  content += '📊 STATUS OVERSIGT:\n';
-  content += data.ga4 === 'Ja' ? '✅ GA4' : '❌ GA4';
-  content += ' | ';
-  content += data.gtm === 'Ja' ? '✅ GTM' : '❌ GTM';
-  content += ' | ';
-  content += data.metaPixel === 'Ja' ? '✅ Meta Pixel' : '❌ Meta Pixel';
-  content += '\n';
+  // Visual status indicators (compact, non-redundant)
+  var statusY = 420;
+  var statusItems = [
+    { label: 'GA4', value: data.ga4 === 'Ja' },
+    { label: 'GTM', value: data.gtm === 'Ja' },
+    { label: 'Meta', value: data.metaPixel === 'Ja' },
+    { label: 'Mobile', value: data.mobileReady === 'Ja' || data.mobileReady === 'Sandsynligvis' },
+    { label: 'Chat', value: !!data.chatWidget },
+    { label: 'Blog', value: data.hasBlog === 'Ja' }
+  ];
   
-  if (data.mobileReady) content += '📱 Mobile: ' + data.mobileReady + '\n';
-  if (data.chatWidget) content += '💬 Chat: ' + data.chatWidget + '\n';
-  if (data.emailPlatform) content += '📧 Email: ' + data.emailPlatform + '\n';
-  if (data.hasBlog) content += '📝 Blog: ' + data.hasBlog + '\n';
-  if (data.videoMarketing) content += '🎬 Video: ' + data.videoMarketing + '\n';
+  var statusText = statusItems.map(function(item) {
+    return (item.value ? '🟢' : '⚫') + ' ' + item.label;
+  }).join('  ');
   
-  shapes[1].getText().setText(content);
+  var statusBox = slide.insertTextBox(statusText, 40, statusY, 620, 30);
+  styleText_(statusBox.getText(), {
+    color: SLIDE_THEME.colors.light,
+    fontSize: SLIDE_THEME.sizes.bodySmall,
+    fontFamily: SLIDE_THEME.fonts.mono
+  });
 }
 
 /**
- * Økonomiske data slide - bruger AI FINANSIEL VURDERING
+ * Økonomisk slide - AI context, minimal raw data redundancy
  */
 function createFinancialSlide_(presentation, data, aiSections) {
-  var slide = presentation.appendSlide(SlidesApp.PredefinedLayout.TITLE_AND_BODY);
-  var shapes = slide.getShapes();
+  var slide = presentation.appendSlide(SlidesApp.PredefinedLayout.BLANK);
+  setSlideBackground_(slide, '#FFFFFF');
   
-  shapes[0].getText().setText('Økonomisk Kontekst');
+  // Title
+  var titleBox = slide.insertTextBox('Økonomisk Kontekst', 40, 30, 620, 50);
+  styleText_(titleBox.getText(), {
+    color: SLIDE_THEME.colors.primary,
+    fontSize: SLIDE_THEME.sizes.titleMedium,
+    fontFamily: SLIDE_THEME.fonts.title,
+    bold: true
+  });
   
-  var content = '';
-  
-  // Brug AI's finansielle analyse
+  // AI Analysis (main content - contains numbers in context)
   if (aiSections.financial) {
-    content += '🤖 AI ANALYSE:\n' + aiSections.financial + '\n\n';
+    var analysisBox = slide.insertTextBox(aiSections.financial, 40, 100, 620, 300);
+    styleText_(analysisBox.getText(), {
+      color: SLIDE_THEME.colors.dark,
+      fontSize: SLIDE_THEME.sizes.bodyLarge,
+      fontFamily: SLIDE_THEME.fonts.body
+    });
   }
   
-  // Tilføj rådata
-  content += '💰 NØGLETAL (Proff.dk):\n';
-  if (data.proffRevenue) content += '📈 Omsætning: ' + data.proffRevenue + '\n';
-  if (data.proffProfit) content += '💵 Resultat: ' + data.proffProfit + '\n';
-  if (data.proffEmployees) content += '👥 Ansatte: ' + data.proffEmployees + '\n';
-  
-  shapes[1].getText().setText(content);
+  // Only show source reference (data already in AI analysis)
+  if (data.proffRevenue || data.proffProfit || data.proffEmployees) {
+    var sourceBox = slide.insertTextBox('Kilde: Proff.dk', 40, 460, 620, 20);
+    styleText_(sourceBox.getText(), {
+      color: SLIDE_THEME.colors.light,
+      fontSize: SLIDE_THEME.sizes.bodySmall,
+      fontFamily: SLIDE_THEME.fonts.body,
+      italic: true
+    });
+  }
 }
 
 /**
- * Konkurrencelandskab slide - bruger AI KONKURRENCELANDSKAB
+ * Konkurrencelandskab slide - AI analysis only (already contains competitor names)
  */
 function createCompetitiveSlide_(presentation, data, aiSections) {
-  var slide = presentation.appendSlide(SlidesApp.PredefinedLayout.TITLE_AND_BODY);
-  var shapes = slide.getShapes();
+  var slide = presentation.appendSlide(SlidesApp.PredefinedLayout.BLANK);
+  setSlideBackground_(slide, '#FFFFFF');
   
-  shapes[0].getText().setText('Konkurrence & Marked');
+  // Title
+  var titleBox = slide.insertTextBox('Konkurrencelandskab', 40, 30, 620, 50);
+  styleText_(titleBox.getText(), {
+    color: SLIDE_THEME.colors.primary,
+    fontSize: SLIDE_THEME.sizes.titleMedium,
+    fontFamily: SLIDE_THEME.fonts.title,
+    bold: true
+  });
   
-  var content = '';
-  
-  // Brug AI's competitive analyse
+  // AI Analysis (contains competitor context - no need for raw lists)
   if (aiSections.competitive) {
-    content += '🤖 AI ANALYSE:\n' + aiSections.competitive + '\n\n';
-  }
-  
-  // Tilføj konkurrentdata
-  content += '🏁 KONKURRENTER:\n';
-  if (data.competitors) {
-    content += data.competitors + '\n';
+    var analysisBox = slide.insertTextBox(aiSections.competitive, 40, 100, 620, 350);
+    styleText_(analysisBox.getText(), {
+      color: SLIDE_THEME.colors.dark,
+      fontSize: SLIDE_THEME.sizes.bodyLarge,
+      fontFamily: SLIDE_THEME.fonts.body
+    });
   } else {
-    content += 'Ingen identificeret\n';
+    // Fallback only if no AI
+    var fallback = 'Konkurrenter: ' + (data.competitors || 'Ingen fundet') + '\n\n';
+    fallback += 'Social Media: ' + (data.socialMedia || 'Ingen kanaler');
+    var fallbackBox = slide.insertTextBox(fallback, 40, 100, 620, 350);
+    styleText_(fallbackBox.getText(), {
+      color: SLIDE_THEME.colors.light,
+      fontSize: SLIDE_THEME.sizes.bodyMedium,
+      fontFamily: SLIDE_THEME.fonts.body
+    });
   }
-  
-  content += '\n🌐 SOCIAL MEDIA:\n';
-  if (data.socialMedia) {
-    content += data.socialMedia + '\n';
-  } else {
-    content += 'Ingen kanaler fundet\n';
-  }
-  
-  if (data.adPlatforms) {
-    content += '\n📱 AD PLATFORMS:\n' + data.adPlatforms;
-  }
-  
-  shapes[1].getText().setText(content);
 }
 
 /**
- * Muligheder og next steps slide - bruger AI SALGSMULIGHEDER + KEY QUESTIONS
+ * Muligheder slide - Action-focused AI insights, styled for impact
  */
 function createOpportunitiesSlide_(presentation, data, aiSections) {
-  var slide = presentation.appendSlide(SlidesApp.PredefinedLayout.TITLE_AND_BODY);
-  var shapes = slide.getShapes();
+  var slide = presentation.appendSlide(SlidesApp.PredefinedLayout.BLANK);
+  setSlideBackground_(slide, '#FFFFFF');
   
-  shapes[0].getText().setText('Muligheder & Næste Skridt');
+  // Title
+  var titleBox = slide.insertTextBox('Næste Skridt', 40, 30, 620, 50);
+  styleText_(titleBox.getText(), {
+    color: SLIDE_THEME.colors.secondary,
+    fontSize: SLIDE_THEME.sizes.titleMedium,
+    fontFamily: SLIDE_THEME.fonts.title,
+    bold: true
+  });
   
-  var content = '';
+  var yPos = 100;
   
-  // Brug AI's sales opportunities
+  // Sales Opportunities
   if (aiSections.opportunities) {
-    content += '🎯 SALGSMULIGHEDER:\n' + aiSections.opportunities + '\n\n';
-  } else {
-    // Fallback til basic recommendations
-    content += '🎯 ANBEFALINGER:\n';
-    if (data.ga4 !== 'Ja') content += '• Implementer Google Analytics 4\n';
-    if (data.gtm !== 'Ja') content += '• Opsæt Google Tag Manager\n';
-    if (data.metaPixel !== 'Ja') content += '• Tilføj Meta Pixel tracking\n';
-    if (!data.chatWidget) content += '• Overvej chat widget\n';
-    content += '\n';
+    var oppBox = slide.insertTextBox(aiSections.opportunities, 40, yPos, 620, 180);
+    styleText_(oppBox.getText(), {
+      color: SLIDE_THEME.colors.dark,
+      fontSize: SLIDE_THEME.sizes.bodyLarge,
+      fontFamily: SLIDE_THEME.fonts.body
+    });
+    yPos += 200;
   }
   
-  // Tilføj AI's key questions
+  // Key Questions
   if (aiSections.questions) {
-    content += '❓ SPØRGSMÅL TIL MØDET:\n' + aiSections.questions;
-  } else {
-    content += '📞 NEXT STEP: Book møde for at diskutere muligheder';
+    var questionsBox = slide.insertTextBox(aiSections.questions, 40, yPos, 620, 150);
+    styleText_(questionsBox.getText(), {
+      color: SLIDE_THEME.colors.primary,
+      fontSize: SLIDE_THEME.sizes.bodyMedium,
+      fontFamily: SLIDE_THEME.fonts.body
+    });
   }
   
-  shapes[1].getText().setText(content);
+  // Call to action footer
+  var ctaBox = slide.insertTextBox('📞 Lad os tale om hvordan AutoUncle kan hjælpe', 40, 480, 620, 30);
+  styleText_(ctaBox.getText(), {
+    color: SLIDE_THEME.colors.secondary,
+    fontSize: SLIDE_THEME.sizes.bodyMedium,
+    fontFamily: SLIDE_THEME.fonts.title,
+    bold: true
+  });
+  ctaBox.getText().getParagraphStyle().setParagraphAlignment(SlidesApp.ParagraphAlignment.CENTER);
 }
