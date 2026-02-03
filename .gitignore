@@ -1,0 +1,49 @@
+# Google Apps Script
+.clasp.json
+.claspignore
+
+# Credentials & API Keys
+credentials.json
+api-keys.txt
+*.key
+
+# IDE & Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Logs
+*.log
+logs/
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+
+# Backup files
+*.bak
+backup/
+*.backup
+
+# Node modules (hvis du bruger clasp)
+node_modules/
+package-lock.json
+
+# Test output
+test-results/
+coverage/
+
+# Documentation builds
+docs/_build/
+
+# Environment
+.env
+.env.local
