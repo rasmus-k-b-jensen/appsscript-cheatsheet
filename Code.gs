@@ -100,7 +100,8 @@ function setupHeaders() {
       'URL','Domain','CVR (guess)','Telefon','Email','GA4','GTM','Meta Pixel','Google Ads tag',
       'Competitors found','Social Media','Notes','AI Briefing','Last run',
       'GA4 IDs','GTM IDs','Meta Pixel IDs','Google Ads AW IDs','CMP/Cookie vendor',
-      'Pages scanned','Proff link','Ad Platforms','Proff Omsætning','Proff Resultat','Proff Ansatte'
+      'Pages scanned','Proff link','Ad Platforms','Proff Omsætning','Proff Resultat','Proff Ansatte',
+      'Website Platform','Mobile-Ready','Chat Widget','Kontaktformularer','Blog','Video Marketing','Email Platform'
     ];
 
     sh.getRange(1, 1, 1, headers.length).setValues([headers]);
@@ -268,7 +269,7 @@ function runMvpForRow_(sh, row) {
       return;
     }
 
-  // Prepare all data for batch write (columns 3-22, excluding 13 and 21 which are set separately)
+  // Prepare all data for batch write (columns 3-32, excluding 13 and 21 which are set separately)
   var ga4Status = result.ga4Ids.length ? 'Yes' : (result.ga4LikelyViaJs ? 'Likely' : 'No');
   var ga4IdsDisplay = result.ga4Ids.length ? result.ga4Ids.join(', ') : (result.ga4LikelyViaJs ? 'Manual review needed' : '');
   
@@ -301,6 +302,18 @@ function runMvpForRow_(sh, row) {
   
   // Column V (22): Ad Platforms (separate because we skip column U/21)
   sh.getRange(row, 22).setValue(result.adPlatforms.join(', '));
+  
+  // Batch write: columns 26-32 (new digital maturity & marketing columns, skip Proff columns 23-25)
+  var batchData3 = [[
+    result.websitePlatform || '',               // Z (26): Website Platform
+    result.mobileReady || '',                   // AA (27): Mobile-Ready
+    result.chatWidget || '',                    // AB (28): Chat Widget
+    result.contactForms || '',                  // AC (29): Kontaktformularer
+    result.hasBlog || '',                       // AD (30): Blog
+    result.videoMarketing || '',                // AE (31): Video Marketing
+    result.emailPlatform || ''                  // AF (32): Email Platform
+  ]];
+  sh.getRange(row, 26, 1, 7).setValues(batchData3);
   
   // Proff.dk financial data (optional - can be slow)
   var proffData = scrapeProffData_(result.cvr, domain);
@@ -529,6 +542,15 @@ function scanWebsite_(url, maxPages) {
   if (adPlatforms.length) notes.push('Ad platforms detected: ' + adPlatforms.join(', '));
   if (!phone && !email) notes.push('No contact info found in HTML.');
 
+  // Detect digital maturity & marketing features
+  var websitePlatform = detectWebsitePlatform_(allHtml);
+  var mobileReady = detectMobileReady_(allHtml);
+  var chatWidget = detectChatWidget_(allHtml);
+  var contactForms = countContactForms_(allHtml);
+  var hasBlog = detectBlog_(allHtml);
+  var videoMarketing = detectVideoMarketing_(allHtml);
+  var emailPlatform = detectEmailPlatform_(allHtml);
+
   return {
     cvr: cvr,
     phone: phone,
@@ -543,7 +565,14 @@ function scanWebsite_(url, maxPages) {
     socialMedia: socialMedia,
     adPlatforms: adPlatforms,
     pagesScanned: pagesScanned,
-    notes: notes
+    notes: notes,
+    websitePlatform: websitePlatform,
+    mobileReady: mobileReady,
+    chatWidget: chatWidget,
+    contactForms: contactForms,
+    hasBlog: hasBlog,
+    videoMarketing: videoMarketing,
+    emailPlatform: emailPlatform
   };
 }
 
@@ -933,6 +962,169 @@ function detectAdPlatforms_(html) {
     }
   }
   return found;
+}
+
+/**
+ * Detect website platform/CMS from HTML.
+ * @param {string} html - The HTML content to search
+ * @return {string} Platform name or 'Custom/Unknown'
+ */
+function detectWebsitePlatform_(html) {
+  var platforms = [
+    { name: 'WordPress', patterns: ['wp-content', 'wp-includes', /generator.*WordPress/i] },
+    { name: 'Wix', patterns: ['wix.com', 'wixstatic.com'] },
+    { name: 'Shopify', patterns: ['cdn.shopify.com', 'myshopify.com'] },
+    { name: 'AutoDesktop', patterns: ['autodesktop.dk', 'autodesktop.com'] },
+    { name: 'Bilinfo', patterns: ['bilinfo.net'] },
+    { name: 'Webflow', patterns: ['webflow.io', 'webflow.com'] },
+    { name: 'Squarespace', patterns: ['squarespace.com'] }
+  ];
+  
+  for (var i = 0; i < platforms.length; i++) {
+    var p = platforms[i];
+    for (var j = 0; j < p.patterns.length; j++) {
+      var pattern = p.patterns[j];
+      if (typeof pattern === 'string') {
+        if (html.indexOf(pattern) !== -1) return p.name;
+      } else {
+        if (pattern.test(html)) return p.name;
+      }
+    }
+  }
+  return 'Custom/Unknown';
+}
+
+/**
+ * Detect if website is mobile-ready.
+ * @param {string} html - The HTML content to search
+ * @return {string} 'Ja', 'Sandsynligvis', or 'Nej'
+ */
+function detectMobileReady_(html) {
+  var hasViewport = /<meta[^>]*viewport[^>]*>/i.test(html);
+  var hasBootstrap = /bootstrap/i.test(html);
+  var hasFoundation = /foundation/i.test(html);
+  var hasResponsiveCSS = /@media.*screen/i.test(html);
+  
+  if (hasViewport && (hasBootstrap || hasFoundation || hasResponsiveCSS)) {
+    return 'Ja';
+  }
+  return hasViewport ? 'Sandsynligvis' : 'Nej';
+}
+
+/**
+ * Detect chat widgets on website.
+ * @param {string} html - The HTML content to search
+ * @return {string} Comma-separated chat widget names or 'Ingen'
+ */
+function detectChatWidget_(html) {
+  var chatWidgets = [
+    { name: 'Intercom', patterns: ['intercom.io', 'intercom.com'] },
+    { name: 'Drift', patterns: ['drift.com', 'driftt.com'] },
+    { name: 'LiveChat', patterns: ['livechatinc.com', 'livechat.com'] },
+    { name: 'Zendesk', patterns: ['zendesk.com', 'zdassets.com'] },
+    { name: 'Tawk.to', patterns: ['tawk.to'] },
+    { name: 'Crisp', patterns: ['crisp.chat'] },
+    { name: 'Messenger', patterns: ['facebook.com/plugins/customerchat', 'connect.facebook.net/en_US/sdk/xfbml.customerchat'] }
+  ];
+  
+  var found = [];
+  for (var i = 0; i < chatWidgets.length; i++) {
+    var widget = chatWidgets[i];
+    for (var j = 0; j < widget.patterns.length; j++) {
+      if (html.indexOf(widget.patterns[j]) !== -1) {
+        found.push(widget.name);
+        break;
+      }
+    }
+  }
+  return found.length > 0 ? found.join(', ') : 'Ingen';
+}
+
+/**
+ * Count contact forms on website.
+ * @param {string} html - The HTML content to search
+ * @return {string} Form count description or 'Ingen'
+ */
+function countContactForms_(html) {
+  var forms = extractAll_(html, /<form[^>]*>[\s\S]*?<\/form>/gi);
+  
+  var contactForms = 0;
+  for (var i = 0; i < forms.length; i++) {
+    var form = forms[i].toLowerCase();
+    if ((form.indexOf('email') !== -1 || form.indexOf('mail') !== -1 || 
+         form.indexOf('telefon') !== -1 || form.indexOf('phone') !== -1) &&
+        (form.indexOf('textarea') !== -1 || form.indexOf('message') !== -1 || 
+         form.indexOf('besked') !== -1 || form.indexOf('kommentar') !== -1)) {
+      contactForms++;
+    }
+  }
+  
+  return contactForms > 0 ? contactForms.toString() : 'Ingen';
+}
+
+/**
+ * Detect blog/news section.
+ * @param {string} html - The HTML content to search
+ * @return {string} 'Ja' with path or 'Nej'
+ */
+function detectBlog_(html) {
+  var blogPatterns = ['/blog', '/nyheder', '/news', '/artikler', '/articles'];
+  
+  var lower = html.toLowerCase();
+  for (var i = 0; i < blogPatterns.length; i++) {
+    if (lower.indexOf(blogPatterns[i]) !== -1) {
+      return 'Ja (' + blogPatterns[i] + ')';
+    }
+  }
+  return 'Nej';
+}
+
+/**
+ * Detect video marketing platforms.
+ * @param {string} html - The HTML content to search
+ * @return {string} Video platforms with counts or 'Ingen'
+ */
+function detectVideoMarketing_(html) {
+  var videoPatterns = [
+    { name: 'YouTube', pattern: /youtube\.com\/embed|youtube\.com\/watch|youtu\.be\//gi },
+    { name: 'Vimeo', pattern: /vimeo\.com/gi },
+    { name: 'Wistia', pattern: /wistia\.com/gi }
+  ];
+  
+  var found = [];
+  for (var i = 0; i < videoPatterns.length; i++) {
+    var matches = html.match(videoPatterns[i].pattern);
+    if (matches && matches.length > 0) {
+      found.push(videoPatterns[i].name + ' (' + matches.length + ')');
+    }
+  }
+  return found.length > 0 ? found.join(', ') : 'Ingen';
+}
+
+/**
+ * Detect email marketing platform.
+ * @param {string} html - The HTML content to search
+ * @return {string} Platform name or 'Ingen'
+ */
+function detectEmailPlatform_(html) {
+  var platforms = [
+    { name: 'Mailchimp', patterns: ['mailchimp.com', 'mc.us'] },
+    { name: 'ActiveCampaign', patterns: ['activecampaign.com'] },
+    { name: 'GetResponse', patterns: ['getresponse.com'] },
+    { name: 'Klaviyo', patterns: ['klaviyo.com'] },
+    { name: 'SendGrid', patterns: ['sendgrid.com', 'sendgrid.net'] },
+    { name: 'HubSpot', patterns: ['hubspot.com', 'hs-scripts.com'] }
+  ];
+  
+  for (var i = 0; i < platforms.length; i++) {
+    var p = platforms[i];
+    for (var j = 0; j < p.patterns.length; j++) {
+      if (html.indexOf(p.patterns[j]) !== -1) {
+        return p.name;
+      }
+    }
+  }
+  return 'Ingen';
 }
 
 /**
