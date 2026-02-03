@@ -97,11 +97,22 @@ function setupHeaders() {
     var sh = ss.getSheetByName(SHEET_NAME) || ss.insertSheet(SHEET_NAME);
 
     var headers = [
-      'URL','Domain','CVR (guess)','Telefon','Email','GA4','GTM','Meta Pixel','Google Ads tag',
-      'Competitors found','Social Media','Notes','AI Briefing','Last run',
-      'GA4 IDs','GTM IDs','Meta Pixel IDs','Google Ads AW IDs','CMP/Cookie vendor',
-      'Pages scanned','Proff link','Ad Platforms','Proff Omsætning','Proff Resultat','Proff Ansatte',
-      'Website Platform','Bilforhandler Platform','Mobile-Ready','Chat Widget','Kontaktformularer','Blog','Video Marketing','Email Platform'
+      // GRUNDDATA (A-E)
+      'URL','Domain','CVR (guess)','Telefon','Email',
+      // TEKNOLOGI & PLATFORM (F-J)
+      'Website Platform','Bilforhandler Platform','Mobile-Ready','CMP/Cookie vendor','Chat Widget',
+      // TRACKING & ANALYTICS (K-Q)
+      'GA4','GA4 IDs','GTM','GTM IDs','Meta Pixel','Meta Pixel IDs','Google Ads tag',
+      // MARKETING TOOLS (R-U)
+      'Google Ads AW IDs','Email Platform','Kontaktformularer','Blog',
+      // BUSINESS DATA (V-Y)
+      'Proff link','Proff Omsætning','Proff Resultat','Proff Ansatte',
+      // KONKURRENCE & SOCIAL (Z-AB)
+      'Competitors found','Social Media','Ad Platforms',
+      // MEDIA & INDHOLD (AC)
+      'Video Marketing',
+      // METADATA (AD-AG)
+      'Pages scanned','Last run','AI Briefing','Notes'
     ];
 
     sh.getRange(1, 1, 1, headers.length).setValues([headers]);
@@ -263,72 +274,89 @@ function runMvpForRow_(sh, row) {
       result = scanWebsite_(normalized, MAX_PAGES);
     } catch (e) {
       var errorMsg = 'Fetch error: ' + (e && e.message ? e.message : e);
-      sh.getRange(row, 12).setValue(errorMsg); // Notes kolonne
-      sh.getRange(row, 14).setValue(new Date()); // Last run
+      sh.getRange(row, 33).setValue(errorMsg); // Notes kolonne (AG)
+      sh.getRange(row, 31).setValue(new Date()); // Last run (AF)
       Logger.log('Row ' + row + ' scan error: ' + errorMsg);
       return;
     }
 
-  // Prepare all data for batch write (columns 3-32, excluding 13 and 21 which are set separately)
   var ga4Status = result.ga4Ids.length ? 'Yes' : (result.ga4LikelyViaJs ? 'Likely' : 'No');
   var ga4IdsDisplay = result.ga4Ids.length ? result.ga4Ids.join(', ') : (result.ga4LikelyViaJs ? 'Manual review needed' : '');
   
-  // Batch write: columns 3-12 (CVR through Notes)
+  // GRUNDDATA (C-E: 3 cols)
   var batchData1 = [[
     result.cvr || '',                           // C: CVR
-    result.phone || '',                         // D: Phone
-    result.email || '',                         // E: Email
-    ga4Status,                                  // F: GA4 (Yes/Likely/No)
-    result.gtmIds.length ? 'Yes' : 'No',       // G: GTM
-    result.metaPixelIds.length ? 'Yes' : 'No', // H: Meta Pixel
-    result.awIds.length ? 'Yes' : 'No',        // I: Google Ads
-    result.competitors.join(', '),              // J: Competitors
-    result.socialMedia.join(', '),              // K: Social Media
-    result.notes.join(' | ')                    // L: Notes
+    result.phone || '',                         // D: Telefon
+    result.email || ''                          // E: Email
   ]];
-  sh.getRange(row, 3, 1, 10).setValues(batchData1);
+  sh.getRange(row, 3, 1, 3).setValues(batchData1);
   
-  // Batch write: columns 14-20, 22 (Last run through Ad Platforms, skip AI Briefing col 13 and Proff URL col 21)
+  // TEKNOLOGI & PLATFORM (F-J: 5 cols)
   var batchData2 = [[
-    new Date(),                                 // N: Last run
-    ga4IdsDisplay,                              // O: GA4 IDs
-    result.gtmIds.join(', '),                  // P: GTM IDs
-    result.metaPixelIds.join(', '),            // Q: Meta Pixel IDs
-    result.awIds.join(', '),                   // R: Google Ads IDs
-    result.cmpVendors.join(', '),              // S: CMP
-    result.pagesScanned.join(' | ')            // T: Pages scanned
+    result.websitePlatform || '',               // F: Website Platform
+    result.carDealerPlatform || '',             // G: Bilforhandler Platform
+    result.mobileReady || '',                   // H: Mobile-Ready
+    result.cmpVendors.join(', '),               // I: CMP/Cookie vendor
+    result.chatWidget || ''                     // J: Chat Widget
   ]];
-  sh.getRange(row, 14, 1, 7).setValues(batchData2);
+  sh.getRange(row, 6, 1, 5).setValues(batchData2);
   
-  // Column V (22): Ad Platforms (separate because we skip column U/21)
-  sh.getRange(row, 22).setValue(result.adPlatforms.join(', '));
-  
-  // Batch write: columns 26-33 (digital maturity & marketing columns, skip Proff columns 23-25)
+  // TRACKING & ANALYTICS (K-Q: 7 cols)
   var batchData3 = [[
-    result.websitePlatform || '',               // Z (26): Website Platform
-    result.carDealerPlatform || '',             // AA (27): Bilforhandler Platform
-    result.mobileReady || '',                   // AB (28): Mobile-Ready
-    result.chatWidget || '',                    // AC (29): Chat Widget
-    result.contactForms || '',                  // AD (30): Kontaktformularer
-    result.hasBlog || '',                       // AE (31): Blog
-    result.videoMarketing || '',                // AF (32): Video Marketing
-    result.emailPlatform || ''                  // AG (33): Email Platform
+    ga4Status,                                  // K: GA4
+    ga4IdsDisplay,                              // L: GA4 IDs
+    result.gtmIds.length ? 'Yes' : 'No',       // M: GTM
+    result.gtmIds.join(', '),                  // N: GTM IDs
+    result.metaPixelIds.length ? 'Yes' : 'No', // O: Meta Pixel
+    result.metaPixelIds.join(', '),            // P: Meta Pixel IDs
+    result.awIds.length ? 'Yes' : 'No'         // Q: Google Ads tag
   ]];
-  sh.getRange(row, 26, 1, 8).setValues(batchData3);
+  sh.getRange(row, 11, 1, 7).setValues(batchData3);
   
-  // Proff.dk financial data (optional - can be slow)
+  // MARKETING TOOLS (R-U: 4 cols)
+  var batchData4 = [[
+    result.awIds.join(', '),                   // R: Google Ads AW IDs
+    result.emailPlatform || '',                 // S: Email Platform
+    result.contactForms || '',                  // T: Kontaktformularer
+    result.hasBlog || ''                        // U: Blog
+  ]];
+  sh.getRange(row, 18, 1, 4).setValues(batchData4);
+  
+  // BUSINESS DATA - Proff.dk (V-Y: 4 cols)
   var proffData = scrapeProffData_(result.cvr, domain);
-  sh.getRange(row, 21).setValue(proffData.proffUrl);
+  sh.getRange(row, 22).setValue(proffData.proffUrl);  // V: Proff link
   
-  // Set financial data as text to preserve Danish formatting (e.g., "307.000")
   if (proffData.revenue) {
-    sh.getRange(row, 23).setValue(proffData.revenue).setNumberFormat('@STRING@');
+    sh.getRange(row, 23).setValue(proffData.revenue).setNumberFormat('@STRING@');  // W: Omsætning
   }
   if (proffData.profit) {
-    sh.getRange(row, 24).setValue(proffData.profit).setNumberFormat('@STRING@');
+    sh.getRange(row, 24).setValue(proffData.profit).setNumberFormat('@STRING@');   // X: Resultat
   }
   if (proffData.employees) {
-    sh.getRange(row, 25).setValue(proffData.employees);
+    sh.getRange(row, 25).setValue(proffData.employees);  // Y: Ansatte
+  }
+  
+  // KONKURRENCE & SOCIAL (Z-AB: 3 cols)
+  var batchData5 = [[
+    result.competitors.join(', '),              // Z: Competitors
+    result.socialMedia.join(', '),              // AA: Social Media
+    result.adPlatforms.join(', ')               // AB: Ad Platforms
+  ]];
+  sh.getRange(row, 26, 1, 3).setValues(batchData5);
+  
+  // MEDIA & INDHOLD (AC: 1 col)
+  sh.getRange(row, 29).setValue(result.videoMarketing || '');  // AC: Video Marketing
+  
+  // METADATA (AD-AG: 4 cols) - AD (Pages scanned) and AF (Last run) set, skip AE (AI Briefing) and AG (Notes)
+  var batchData6 = [[
+    result.pagesScanned.join(' | '),           // AD: Pages scanned
+    new Date()                                  // AF: Last run
+  ]];
+  sh.getRange(row, 30, 1, 1).setValues([[result.pagesScanned.join(' | ')]]);  // AD
+  sh.getRange(row, 31, 1, 1).setValues([[new Date()]]);                        // AF
+  // AG (33): Notes - set separately when there are notes
+  if (result.notes.length > 0) {
+    sh.getRange(row, 33).setValue(result.notes.join(' | '));
   }
   
   // Update headers with accounting year if available
@@ -340,8 +368,8 @@ function runMvpForRow_(sh, row) {
     // Generel error handling for hele funktionen
     var errorMsg = 'Error: ' + (e.message || e);
     try {
-      sh.getRange(row, 12).setValue(errorMsg); // Notes
-      sh.getRange(row, 14).setValue(new Date()); // Last run
+      sh.getRange(row, 33).setValue(errorMsg); // Notes (AG)
+      sh.getRange(row, 31).setValue(new Date()); // Last run (AF)
     } catch (e2) {
       Logger.log('Cannot write error to row ' + row + ': ' + e2.message);
     }
