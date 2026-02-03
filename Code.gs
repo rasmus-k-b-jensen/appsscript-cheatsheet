@@ -268,34 +268,38 @@ function runMvpForRow_(sh, row) {
       return;
     }
 
-  // Core fields
-  sh.getRange(row, 3).setValue(result.cvr || '');
-  sh.getRange(row, 4).setValue(result.phone || '');
-  sh.getRange(row, 5).setValue(result.email || '');
-  
-  // GA4: Show "Yes" if IDs found, "Likely" if detected via JS indicators, otherwise "No"
+  // Prepare all data for batch write (columns 3-22, excluding 13 and 21 which are set separately)
   var ga4Status = result.ga4Ids.length ? 'Yes' : (result.ga4LikelyViaJs ? 'Likely' : 'No');
-  sh.getRange(row, 6).setValue(ga4Status);
-  
-  sh.getRange(row, 7).setValue(result.gtmIds.length ? 'Yes' : 'No');
-  sh.getRange(row, 8).setValue(result.metaPixelIds.length ? 'Yes' : 'No');
-  sh.getRange(row, 9).setValue(result.awIds.length ? 'Yes' : 'No');
-  sh.getRange(row, 10).setValue(result.competitors.join(', '));
-  sh.getRange(row, 11).setValue(result.socialMedia.join(', '));
-  sh.getRange(row, 12).setValue(result.notes.join(' | '));
-
-  // Timestamps + IDs/extras
-  sh.getRange(row, 14).setValue(new Date());
-  
-  // GA4 IDs: Show actual IDs or "Manual review needed" if likely via JS
   var ga4IdsDisplay = result.ga4Ids.length ? result.ga4Ids.join(', ') : (result.ga4LikelyViaJs ? 'Manual review needed' : '');
-  sh.getRange(row, 15).setValue(ga4IdsDisplay);
   
-  sh.getRange(row, 16).setValue(result.gtmIds.join(', '));
-  sh.getRange(row, 17).setValue(result.metaPixelIds.join(', '));
-  sh.getRange(row, 18).setValue(result.awIds.join(', '));
-  sh.getRange(row, 19).setValue(result.cmpVendors.join(', '));
-  sh.getRange(row, 20).setValue(result.pagesScanned.join(' | '));
+  // Batch write: columns 3-12 (CVR through Notes)
+  var batchData1 = [[
+    result.cvr || '',                           // C: CVR
+    result.phone || '',                         // D: Phone
+    result.email || '',                         // E: Email
+    ga4Status,                                  // F: GA4 (Yes/Likely/No)
+    result.gtmIds.length ? 'Yes' : 'No',       // G: GTM
+    result.metaPixelIds.length ? 'Yes' : 'No', // H: Meta Pixel
+    result.awIds.length ? 'Yes' : 'No',        // I: Google Ads
+    result.competitors.join(', '),              // J: Competitors
+    result.socialMedia.join(', '),              // K: Social Media
+    result.notes.join(' | ')                    // L: Notes
+  ]];
+  sh.getRange(row, 3, 1, 10).setValues(batchData1);
+  
+  // Batch write: columns 14-20, 22 (Last run through Ad Platforms, skip AI Briefing col 13 and Proff URL col 21)
+  var batchData2 = [[
+    new Date(),                                 // N: Last run
+    ga4IdsDisplay,                              // O: GA4 IDs
+    result.gtmIds.join(', '),                  // P: GTM IDs
+    result.metaPixelIds.join(', '),            // Q: Meta Pixel IDs
+    result.awIds.join(', '),                   // R: Google Ads IDs
+    result.cmpVendors.join(', '),              // S: CMP
+    result.pagesScanned.join(' | ')            // T: Pages scanned
+  ]];
+  sh.getRange(row, 14, 1, 7).setValues(batchData2);
+  
+  // Column V (22): Ad Platforms (separate because we skip column U/21)
   sh.getRange(row, 22).setValue(result.adPlatforms.join(', '));
   
   // Proff.dk financial data (optional - can be slow)
@@ -444,32 +448,34 @@ function scanWebsite_(url, maxPages) {
   var phone = extractPhone_(allHtml);
   var email = extractEmail_(allHtml);
 
-  // Improved GA4 detection (multiple patterns - like Meta Pixel)
+  // Improved GA4 detection (optimized with combined patterns)
   var ga4Ids = [];
-  // Pattern 1: Standard format (G-XXXXXXXXXX) - must be uppercase and word-bounded
-  ga4Ids = ga4Ids.concat(extractAll_(allHtml, /\bG-[A-Z0-9]{10}\b/g));
-  // Pattern 2: gtag config calls - gtag('config', 'G-XXX') or gtag("config", "G-XXX")
-  ga4Ids = ga4Ids.concat(extractAll_(allHtml, /gtag\s*\(\s*['"]config['"]\s*,\s*['"](G-[A-Z0-9]{10})['"]\s*\)/gi, 1));
-  // Pattern 3: Google Analytics script src - googletagmanager.com/gtag/js?id=G-XXX
-  ga4Ids = ga4Ids.concat(extractAll_(allHtml, /googletagmanager\.com\/gtag\/js\?id=(G-[A-Z0-9]{10})/gi, 1));
-  // Pattern 4: JSON measurementId - "measurementId":"G-XXX" or "trackingId":"G-XXX"
-  ga4Ids = ga4Ids.concat(extractAll_(allHtml, /["'](?:measurementId|trackingId)["']\s*:\s*["'](G-[A-Z0-9]{10})["']/gi, 1));
-  // Pattern 5: dataLayer config - commonly used with GTM
+  
+  // Single mega-pattern: Combine most common GA4 patterns
+  var ga4MegaPattern = /(?:\bG-[A-Z0-9]{10}\b|gtag\s*\(\s*['"]config['"]\s*,\s*['"](G-[A-Z0-9]{10})['"]|googletagmanager\.com\/gtag\/js\?id=(G-[A-Z0-9]{10})|["'](?:measurementId|trackingId)["']\s*:\s*["'](G-[A-Z0-9]{10})["']|ga\s*\(\s*['"]create['"]\s*,\s*['"](G-[A-Z0-9]{10})['"'])/gi;
+  
+  var matches = allHtml.match(ga4MegaPattern) || [];
+  for (var i = 0; i < matches.length; i++) {
+    // Extract the G-XXXXXXXXXX part from each match
+    var idMatch = matches[i].match(/G-[A-Z0-9]{10}/);
+    if (idMatch) ga4Ids.push(idMatch[0]);
+  }
+  
+  // Additional patterns that need special handling
+  // Pattern: dataLayer config
   ga4Ids = ga4Ids.concat(extractAll_(allHtml, /dataLayer\.push\s*\(\s*\{[^}]*['"]?(G-[A-Z0-9]{10})['"]?[^}]*\}\s*\)/gi, 1));
-  // Pattern 6: ga('create') - legacy but sometimes mixed with GA4
-  ga4Ids = ga4Ids.concat(extractAll_(allHtml, /ga\s*\(\s*['"]create['"]\s*,\s*['"](G-[A-Z0-9]{10})['"]/gi, 1));
-  // Pattern 7: URL encoded - id%3DG-XXX or id=G-XXX in URLs (decode first, with error handling)
+  
+  // Pattern: URL encoded (decode first, with error handling)
   try {
     var decoded = decodeURIComponent(allHtml);
     ga4Ids = ga4Ids.concat(extractAll_(decoded, /[?&]id=(G-[A-Z0-9]{10})(?:&|$|["\s])/gi, 1));
   } catch (e) {
-    // Ignore malformed URI sequences
     Logger.log('Could not decode URI for GA4 search: ' + e);
   }
   
   // Filter out false positives (must be ALL UPPERCASE after G-)
   ga4Ids = ga4Ids.filter(function(id) {
-    var suffix = id.substring(2); // Remove "G-"
+    var suffix = id.substring(2);
     return suffix === suffix.toUpperCase() && /^[A-Z0-9]{10}$/.test(suffix);
   });
   ga4Ids = unique_(ga4Ids);
@@ -567,6 +573,11 @@ function fetchHtml_(url) {
   return html;
 }
 
+/**
+ * Extract CVR number from HTML using confidence-based scoring system.
+ * @param {string} html - The HTML content to search
+ * @return {string} The most confident CVR number found, or empty string if none valid
+ */
 function extractCvr_(html) {
   var candidates = [];
   
@@ -662,11 +673,22 @@ function extractCvr_(html) {
   return '';
 }
 
+/**
+ * Extract a section of HTML matching a regex pattern.
+ * @param {string} html - The HTML content to search
+ * @param {RegExp} regex - Regular expression pattern to match
+ * @return {string} The matched section or empty string
+ */
 function extractSection_(html, regex) {
   var match = html.match(regex);
   return match ? match[0] : '';
 }
 
+/**
+ * Validate CVR number format (8 digits, not all same, not sequential).
+ * @param {string} cvr - The CVR number to validate
+ * @return {boolean} True if CVR passes basic validation checks
+ */
 function isValidCvrFormat_(cvr) {
   // Basic validation: 8 digits, not all same digit, not sequential
   if (!cvr || cvr.length !== 8) return false;
@@ -699,6 +721,11 @@ function isValidCvrFormat_(cvr) {
   return true;
 }
 
+/**
+ * Extract Danish phone number from HTML (+45 or 8-digit format).
+ * @param {string} html - The HTML content to search
+ * @return {string} 8-digit phone number or empty string
+ */
 function extractPhone_(html) {
   // Danish phone numbers: +45 XXXXXXXX or XX XX XX XX
   var patterns = [
@@ -718,6 +745,11 @@ function extractPhone_(html) {
   return '';
 }
 
+/**
+ * Extract email address from HTML, prioritizing business emails.
+ * @param {string} html - The HTML content to search
+ * @return {string} Email address or empty string
+ */
 function extractEmail_(html) {
   // Extract email addresses (prefer business/info/kontakt emails)
   var emails = extractAll_(html, /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g);
@@ -745,6 +777,13 @@ function extractEmail_(html) {
   return '';
 }
 
+/**
+ * Extract relevant internal links from HTML (contact, privacy, about pages).
+ * @param {string} html - The HTML content to search
+ * @param {string} baseUrl - Base URL for resolving relative links
+ * @param {number} limit - Maximum number of links to return
+ * @return {string[]} Array of absolute URLs
+ */
 function extractRelevantInternalLinks_(html, baseUrl, limit) {
   var hrefs = extractAll_(html, /href\s*=\s*["']([^"']+)["']/gi, 1);
   var candidates = [];
@@ -794,6 +833,11 @@ function extractRelevantInternalLinks_(html, baseUrl, limit) {
   return candidates.slice(0, limit);
 }
 
+/**
+ * Detect competitor platforms mentioned in HTML.
+ * @param {string} html - The HTML content to search
+ * @return {string[]} Array of detected competitor names
+ */
 function detectCompetitors_(html) {
   var found = [];
   var lower = html.toLowerCase();
@@ -811,6 +855,11 @@ function detectCompetitors_(html) {
   return found;
 }
 
+/**
+ * Detect CMP (Consent Management Platform) vendors in HTML.
+ * @param {string} html - The HTML content to search
+ * @return {string[]} Array of detected CMP vendor names
+ */
 function detectCmpVendors_(html) {
   var lower = html.toLowerCase();
   var found = [];
@@ -827,6 +876,11 @@ function detectCmpVendors_(html) {
   return found;
 }
 
+/**
+ * Detect social media platforms linked in HTML.
+ * @param {string} html - The HTML content to search
+ * @return {string[]} Array of detected social platform names
+ */
 function detectSocialMedia_(html) {
   var lower = html.toLowerCase();
   var found = [];
@@ -852,6 +906,11 @@ function detectSocialMedia_(html) {
   return found;
 }
 
+/**
+ * Detect advertising platforms used in HTML.
+ * @param {string} html - The HTML content to search
+ * @return {string[]} Array of detected ad platform names
+ */
 function detectAdPlatforms_(html) {
   var lower = html.toLowerCase();
   var found = [];
@@ -961,6 +1020,12 @@ function generateBriefingGemini_(url, result) {
   return (text || 'AI briefing: Empty response.').toString().trim();
 }
 
+/**
+ * Build Proff.dk search URL from CVR or domain.
+ * @param {string} cvr - CVR number (preferred, 8 digits)
+ * @param {string} domain - Domain name (fallback)
+ * @return {string} Proff.dk search URL or empty string
+ */
 function buildProffSearchLink_(cvr, domain) {
   // Proff.dk uses internal IDs in URLs, but we can create a precise search link
   // that will likely show the company as first result
@@ -980,8 +1045,10 @@ function buildProffSearchLink_(cvr, domain) {
 }
 
 /**
- * Scrape Proff.dk for financial data
- * Returns: { proffUrl: '...', revenue: '...', profit: '...', employees: '...' }
+ * Scrape Proff.dk for financial data (revenue, profit, employees).
+ * @param {string} cvr - CVR number for company lookup
+ * @param {string} domain - Domain name (fallback if no CVR)
+ * @return {Object} Object with proffUrl, revenue, profit, employees, year properties
  */
 function scrapeProffData_(cvr, domain) {
   if (!cvr && !domain) {
@@ -1191,6 +1258,12 @@ function extractProffFinancialFromTable_(html, label) {
   return '';
 }
 
+/**
+ * Extract financial data from Proff.dk embedded JSON.
+ * @param {string} html - The HTML content containing embedded JSON
+ * @param {string} label - Data type to extract: 'Omsætning', 'Resultat', or 'Ansatte'
+ * @return {string} Formatted value or empty string
+ */
 function extractFromProffJson_(html, label) {
   // Proff.dk embeds JSON: "companyAccounts":[{"accounts":[{"code":"bruttofort","amount":"31777"},...]
   
@@ -1277,6 +1350,11 @@ function extractFromProffJson_(html, label) {
   return '';
 }
 
+/**
+ * Format number with Danish thousand separator (.).
+ * @param {number} num - Number to format (can be negative)
+ * @return {string} Formatted string (e.g., '31.777.000' or '-41.000')
+ */
 function formatDanishNumber_(num) {
   // Format number with Danish thousand separator (.)
   // Example: 31777000 -> "31.777.000", -41000 -> "-41.000"
@@ -1297,6 +1375,11 @@ function formatDanishNumber_(num) {
   return isNegative ? '-' + formatted : formatted;
 }
 
+/**
+ * Extract accounting year from Proff.dk JSON data.
+ * @param {string} html - The HTML content containing embedded JSON
+ * @return {string} Year as string (e.g., '2024') or empty string
+ */
 function extractAccountingYear_(html) {
   // Extract year from JSON: "companyAccounts":[{"year":"2024",...
   var yearMatch = html.match(/"companyAccounts":\[\{"year":"(\d{4})"/);
@@ -1306,6 +1389,11 @@ function extractAccountingYear_(html) {
   return '';
 }
 
+/**
+ * Update Proff.dk column headers with accounting year.
+ * @param {Sheet} sh - The Google Sheet object
+ * @param {string} year - Accounting year to display in headers
+ */
 function updateProffHeaders_(sh, year) {
   // Update Proff column headers to include accounting year
   // Only update if not already set
@@ -1409,6 +1497,12 @@ function getBaseUrl_(url) {
   return m && m[1] ? m[1] : url;
 }
 
+/**
+ * Convert relative URL to absolute URL using base URL.
+ * @param {string} href - Relative or absolute URL
+ * @param {string} baseUrl - Base URL for resolution
+ * @return {string} Absolute URL or empty string on error
+ */
 function toAbsoluteUrl_(href, baseUrl) {
   try {
     if (/^https?:\/\//i.test(href)) return href;
@@ -1423,16 +1517,33 @@ function toAbsoluteUrl_(href, baseUrl) {
   }
 }
 
+/**
+ * Remove hash fragment from URL.
+ * @param {string} u - URL to clean
+ * @return {string} URL without hash
+ */
 function stripUrlHash_(u) {
   return u.split('#')[0];
 }
 
+/**
+ * Check if two URLs belong to the same domain.
+ * @param {string} url - First URL to compare
+ * @param {string} baseUrl - Second URL to compare
+ * @return {boolean} True if domains match
+ */
 function isSameDomain_(url, baseUrl) {
   return extractDomain_(url) === extractDomain_(baseUrl);
 }
 
 /*** Generic helpers ***/
 
+/**
+ * Check if text contains any of the specified keywords.
+ * @param {string} text - Text to search
+ * @param {string[]} keywords - Array of keywords to match
+ * @return {boolean} True if any keyword found
+ */
 function matchesAnyKeyword_(text, keywords) {
   for (var i = 0; i < keywords.length; i++) {
     if (text.indexOf(keywords[i]) !== -1) return true;
@@ -1440,6 +1551,13 @@ function matchesAnyKeyword_(text, keywords) {
   return false;
 }
 
+/**
+ * Extract all regex matches from text.
+ * @param {string} text - Text to search
+ * @param {RegExp} regex - Regular expression (must have 'g' flag)
+ * @param {number} groupIndex - Capture group index (0 for full match)
+ * @return {string[]} Array of all matches
+ */
 function extractAll_(text, regex, groupIndex) {
   var out = [];
   var m;
@@ -1451,6 +1569,11 @@ function extractAll_(text, regex, groupIndex) {
   return out;
 }
 
+/**
+ * Remove duplicate values from array.
+ * @param {Array} arr - Array to deduplicate
+ * @return {Array} Array with unique values
+ */
 function unique_(arr) {
   var seen = {};
   var out = [];
