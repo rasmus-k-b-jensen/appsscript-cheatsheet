@@ -101,7 +101,7 @@ function setupHeaders() {
       'Competitors found','Social Media','Notes','AI Briefing','Last run',
       'GA4 IDs','GTM IDs','Meta Pixel IDs','Google Ads AW IDs','CMP/Cookie vendor',
       'Pages scanned','Proff link','Ad Platforms','Proff Omsætning','Proff Resultat','Proff Ansatte',
-      'Website Platform','Mobile-Ready','Chat Widget','Kontaktformularer','Blog','Video Marketing','Email Platform'
+      'Website Platform','Bilforhandler Platform','Mobile-Ready','Chat Widget','Kontaktformularer','Blog','Video Marketing','Email Platform'
     ];
 
     sh.getRange(1, 1, 1, headers.length).setValues([headers]);
@@ -303,17 +303,18 @@ function runMvpForRow_(sh, row) {
   // Column V (22): Ad Platforms (separate because we skip column U/21)
   sh.getRange(row, 22).setValue(result.adPlatforms.join(', '));
   
-  // Batch write: columns 26-32 (new digital maturity & marketing columns, skip Proff columns 23-25)
+  // Batch write: columns 26-33 (digital maturity & marketing columns, skip Proff columns 23-25)
   var batchData3 = [[
     result.websitePlatform || '',               // Z (26): Website Platform
-    result.mobileReady || '',                   // AA (27): Mobile-Ready
-    result.chatWidget || '',                    // AB (28): Chat Widget
-    result.contactForms || '',                  // AC (29): Kontaktformularer
-    result.hasBlog || '',                       // AD (30): Blog
-    result.videoMarketing || '',                // AE (31): Video Marketing
-    result.emailPlatform || ''                  // AF (32): Email Platform
+    result.carDealerPlatform || '',             // AA (27): Bilforhandler Platform
+    result.mobileReady || '',                   // AB (28): Mobile-Ready
+    result.chatWidget || '',                    // AC (29): Chat Widget
+    result.contactForms || '',                  // AD (30): Kontaktformularer
+    result.hasBlog || '',                       // AE (31): Blog
+    result.videoMarketing || '',                // AF (32): Video Marketing
+    result.emailPlatform || ''                  // AG (33): Email Platform
   ]];
-  sh.getRange(row, 26, 1, 7).setValues(batchData3);
+  sh.getRange(row, 26, 1, 8).setValues(batchData3);
   
   // Proff.dk financial data (optional - can be slow)
   var proffData = scrapeProffData_(result.cvr, domain);
@@ -544,6 +545,7 @@ function scanWebsite_(url, maxPages) {
 
   // Detect digital maturity & marketing features
   var websitePlatform = detectWebsitePlatform_(allHtml);
+  var carDealerPlatform = detectCarDealerPlatform_(allHtml);
   var mobileReady = detectMobileReady_(allHtml);
   var chatWidget = detectChatWidget_(allHtml);
   var contactForms = countContactForms_(allHtml);
@@ -567,6 +569,7 @@ function scanWebsite_(url, maxPages) {
     pagesScanned: pagesScanned,
     notes: notes,
     websitePlatform: websitePlatform,
+    carDealerPlatform: carDealerPlatform,
     mobileReady: mobileReady,
     chatWidget: chatWidget,
     contactForms: contactForms,
@@ -974,10 +977,10 @@ function detectWebsitePlatform_(html) {
     { name: 'WordPress', patterns: ['wp-content', 'wp-includes', /generator.*WordPress/i] },
     { name: 'Wix', patterns: ['wix.com', 'wixstatic.com'] },
     { name: 'Shopify', patterns: ['cdn.shopify.com', 'myshopify.com'] },
-    { name: 'AutoDesktop', patterns: ['autodesktop.dk', 'autodesktop.com'] },
-    { name: 'Bilinfo', patterns: ['bilinfo.net'] },
     { name: 'Webflow', patterns: ['webflow.io', 'webflow.com'] },
-    { name: 'Squarespace', patterns: ['squarespace.com'] }
+    { name: 'Squarespace', patterns: ['squarespace.com'] },
+    { name: 'Joomla', patterns: ['/components/com_', '/modules/mod_', 'Joomla!'] },
+    { name: 'Drupal', patterns: ['drupal.js', '/sites/all/modules/', '/sites/default/'] }
   ];
   
   for (var i = 0; i < platforms.length; i++) {
@@ -1120,6 +1123,34 @@ function detectEmailPlatform_(html) {
     var p = platforms[i];
     for (var j = 0; j < p.patterns.length; j++) {
       if (html.indexOf(p.patterns[j]) !== -1) {
+        return p.name;
+      }
+    }
+  }
+  return 'Ingen';
+}
+
+/**
+ * Detect car dealer website platform/solution.
+ * @param {string} html - The HTML content to search
+ * @return {string} Platform name or 'Ingen'
+ */
+function detectCarDealerPlatform_(html) {
+  var platforms = [
+    { name: 'CarAds', patterns: ['carads', '__carads', 'ca_cta_', 'car_ads_url', 'window.CarAds'] },
+    { name: 'Attityde', patterns: ['attityde.dk', 'attityde.com', 'attityde-'] },
+    { name: 'Bilinfo', patterns: ['bilinfo.net', 'bilinfo.dk', 'bilinfo-'] },
+    { name: 'AutoDesktop', patterns: ['autodesktop.dk', 'autodesktop.com', 'autodesktop-'] },
+    { name: 'DealerSocket', patterns: ['dealersocket.com', 'dealer-socket'] },
+    { name: 'AutoIT', patterns: ['autoit.dk', 'autoit.com'] },
+    { name: 'Bilbasen Pro', patterns: ['bilbasen.dk/pro', 'bilbasenpro'] },
+    { name: 'Hedin IT', patterns: ['hedin-it', 'hedinit'] }
+  ];
+  
+  for (var i = 0; i < platforms.length; i++) {
+    var p = platforms[i];
+    for (var j = 0; j < p.patterns.length; j++) {
+      if (html.toLowerCase().indexOf(p.patterns[j].toLowerCase()) !== -1) {
         return p.name;
       }
     }
