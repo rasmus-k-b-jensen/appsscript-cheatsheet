@@ -413,7 +413,7 @@ function generateAiBriefingForSelection() {
         Utilities.sleep(1000); // Rate limiting between AI calls
       } catch (e) {
         errors++;
-        sh.getRange(r, 13).setValue('AI briefing failed: ' + e.message);
+        sh.getRange(r, 32).setValue('AI briefing failed: ' + e.message);
         Logger.log('AI briefing error row ' + r + ': ' + e.message);
       }
     }
@@ -439,20 +439,53 @@ function generateAiBriefingForRow_(sh, row) {
   var url = (sh.getRange(row, 1).getValue() || '').toString().trim();
   if (!url) return;
   
-  // Read existing scan data from sheet
+  // Read comprehensive data from sheet - ALL new columns
   var result = {
+    // GRUNDDATA (A-E)
+    domain: sh.getRange(row, 2).getValue() || '',
     cvr: sh.getRange(row, 3).getValue() || '',
     phone: sh.getRange(row, 4).getValue() || '',
     email: sh.getRange(row, 5).getValue() || '',
-    ga4Ids: (sh.getRange(row, 15).getValue() || '').toString().split(',').map(function(s) { return s.trim(); }).filter(Boolean),
-    gtmIds: (sh.getRange(row, 16).getValue() || '').toString().split(',').map(function(s) { return s.trim(); }).filter(Boolean),
-    metaPixelIds: (sh.getRange(row, 17).getValue() || '').toString().split(',').map(function(s) { return s.trim(); }).filter(Boolean),
-    competitors: (sh.getRange(row, 10).getValue() || '').toString().split(',').map(function(s) { return s.trim(); }).filter(Boolean),
-    socialMedia: (sh.getRange(row, 11).getValue() || '').toString().split(',').map(function(s) { return s.trim(); }).filter(Boolean)
+    
+    // TEKNOLOGI & PLATFORM (F-J)
+    websitePlatform: sh.getRange(row, 6).getValue() || '',
+    carDealerPlatform: sh.getRange(row, 7).getValue() || '',
+    mobileReady: sh.getRange(row, 8).getValue() || '',
+    cmp: sh.getRange(row, 9).getValue() || '',
+    chatWidget: sh.getRange(row, 10).getValue() || '',
+    
+    // TRACKING & ANALYTICS (K-Q)
+    ga4: sh.getRange(row, 11).getValue() || '',
+    ga4Ids: (sh.getRange(row, 12).getValue() || '').toString().split(',').map(function(s) { return s.trim(); }).filter(Boolean),
+    gtm: sh.getRange(row, 13).getValue() || '',
+    gtmIds: (sh.getRange(row, 14).getValue() || '').toString().split(',').map(function(s) { return s.trim(); }).filter(Boolean),
+    metaPixel: sh.getRange(row, 15).getValue() || '',
+    metaPixelIds: (sh.getRange(row, 16).getValue() || '').toString().split(',').map(function(s) { return s.trim(); }).filter(Boolean),
+    googleAdsTag: sh.getRange(row, 17).getValue() || '',
+    
+    // MARKETING TOOLS (R-U)
+    googleAdsAWIds: (sh.getRange(row, 18).getValue() || '').toString().split(',').map(function(s) { return s.trim(); }).filter(Boolean),
+    emailPlatform: sh.getRange(row, 19).getValue() || '',
+    contactForms: sh.getRange(row, 20).getValue() || '',
+    hasBlog: sh.getRange(row, 21).getValue() || '',
+    
+    // BUSINESS DATA (V-Y)
+    proffLink: sh.getRange(row, 22).getValue() || '',
+    revenue: sh.getRange(row, 23).getValue() || '',
+    profit: sh.getRange(row, 24).getValue() || '',
+    employees: sh.getRange(row, 25).getValue() || '',
+    
+    // KONKURRENCE & SOCIAL (Z-AB)
+    competitors: (sh.getRange(row, 26).getValue() || '').toString().split(',').map(function(s) { return s.trim(); }).filter(Boolean),
+    socialMedia: (sh.getRange(row, 27).getValue() || '').toString().split(',').map(function(s) { return s.trim(); }).filter(Boolean),
+    adPlatforms: (sh.getRange(row, 28).getValue() || '').toString().split(',').map(function(s) { return s.trim(); }).filter(Boolean),
+    
+    // MEDIA & INDHOLD (AC)
+    videoMarketing: sh.getRange(row, 29).getValue() || ''
   };
   
   var briefing = generateBriefingGemini_(url, result);
-  sh.getRange(row, 13).setValue(briefing);
+  sh.getRange(row, 32).setValue(briefing);
 }
 
 function scanWebsite_(url, maxPages) {
@@ -1193,6 +1226,14 @@ function detectCarDealerPlatform_(html) {
  *
  * Endpoint documented here:
  * https://ai.google.dev/api/generate-content
+ * 
+ * Generates comprehensive briefing aligned with 6-slide sales presentation:
+ * 1. Company Overview
+ * 2. Digital Maturity Assessment
+ * 3. Financial Context
+ * 4. Competitive Landscape
+ * 5. Sales Opportunities
+ * 6. Key Questions
  */
 function generateBriefingGemini_(url, result) {
   var props = PropertiesService.getScriptProperties();
@@ -1203,21 +1244,87 @@ function generateBriefingGemini_(url, result) {
 
   var endpoint = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-latest:generateContent';
 
-  var prompt =
-    'Skriv kort salgs-briefing på dansk (max 100 ord) til AutoUncle møde:\n' +
-    'Bilforhandler: ' + url + '\n' +
-    'CVR: ' + (result.cvr || '-') + ', Tlf: ' + (result.phone || '-') + ', Email: ' + (result.email || '-') + '\n' +
-    'Tracking: GA4=' + (result.ga4Ids.length ? 'Ja' : 'Nej') + ', GTM=' + (result.gtmIds.length ? 'Ja' : 'Nej') + 
-    ', Meta Pixel=' + (result.metaPixelIds.length ? 'Ja' : 'Nej') + '\n' +
-    'Konkurrenter: ' + (result.competitors.join(', ') || '-') + '\n' +
-    'Social: ' + (result.socialMedia.join(', ') || '-') + '\n\n' +
-    'Lav: 2 observationer, 1 salgsåbning, 2 spørgsmål.';
+  // Build comprehensive, structured prompt for 6-slide presentation
+  var prompt = 
+    'Du er sales-konsulent hos AutoUncle. Lav en skarp, struktureret briefing på dansk til salgsmøde med bilforhandler.\n\n' +
+    
+    '📊 VIRKSOMHEDSDATA:\n' +
+    'URL: ' + url + '\n' +
+    'Domain: ' + (result.domain || '-') + '\n' +
+    'CVR: ' + (result.cvr || 'Ikke fundet') + '\n' +
+    'Kontakt: ' + (result.phone || 'Ingen tlf') + ' | ' + (result.email || 'Ingen email') + '\n\n' +
+    
+    '💻 TEKNOLOGI & PLATFORM:\n' +
+    'Website Platform: ' + (result.websitePlatform || 'Ukendt') + '\n' +
+    'Bilforhandler Platform: ' + (result.carDealerPlatform || 'Ingen dedikeret platform') + '\n' +
+    'Mobile-Ready: ' + (result.mobileReady || 'Ikke tjekket') + '\n' +
+    'Cookie/CMP: ' + (result.cmp || 'Ingen') + '\n' +
+    'Chat Widget: ' + (result.chatWidget || 'Ingen') + '\n\n' +
+    
+    '📈 TRACKING & ANALYTICS:\n' +
+    'GA4: ' + (result.ga4 === 'Ja' ? '✅ Ja (' + result.ga4Ids.length + ' property)' : '❌ Nej') + '\n' +
+    'GTM: ' + (result.gtm === 'Ja' ? '✅ Ja (' + result.gtmIds.length + ' container)' : '❌ Nej') + '\n' +
+    'Meta Pixel: ' + (result.metaPixel === 'Ja' ? '✅ Ja (' + result.metaPixelIds.length + ' pixel)' : '❌ Nej') + '\n' +
+    'Google Ads tag: ' + (result.googleAdsTag || 'Ingen') + '\n\n' +
+    
+    '🎯 MARKETING TOOLS:\n' +
+    'Google Ads: ' + (result.googleAdsAWIds.length ? result.googleAdsAWIds.length + ' AW-IDs' : 'Ingen') + '\n' +
+    'Email Platform: ' + (result.emailPlatform || 'Ingen detekteret') + '\n' +
+    'Kontaktformularer: ' + (result.contactForms || '0') + '\n' +
+    'Blog: ' + (result.hasBlog || 'Nej') + '\n\n' +
+    
+    '💰 FINANSIELLE DATA (Proff.dk):\n' +
+    'Omsætning: ' + (result.revenue || 'Ikke tilgængelig') + '\n' +
+    'Resultat: ' + (result.profit || 'Ikke tilgængelig') + '\n' +
+    'Ansatte: ' + (result.employees || 'Ukendt') + '\n\n' +
+    
+    '🏁 KONKURRENCE & SOCIAL:\n' +
+    'Konkurrenter: ' + (result.competitors.length ? result.competitors.join(', ') : 'Ingen identificeret') + '\n' +
+    'Social Media: ' + (result.socialMedia.length ? result.socialMedia.join(', ') : 'Ingen') + '\n' +
+    'Ad Platforms: ' + (result.adPlatforms.length ? result.adPlatforms.join(', ') : 'Ingen') + '\n\n' +
+    
+    '🎬 INDHOLD:\n' +
+    'Video Marketing: ' + (result.videoMarketing || 'Ingen') + '\n\n' +
+    
+    '---\n\n' +
+    
+    'OPGAVE: Lav struktureret briefing til disse 6 slides:\n\n' +
+    
+    '1. COMPANY OVERVIEW (2-3 linjer):\n' +
+    '   - Kort virksomhedsprofil baseret på data\n' +
+    '   - Platform-setup (WordPress/CarAds/andet)\n' +
+    '   - Finansiel kontekst hvis tilgængelig\n\n' +
+    
+    '2. DIGITAL MODNING (3-4 linjer):\n' +
+    '   - Tracking-modenhed (GA4, GTM, Meta Pixel status)\n' +
+    '   - Marketing tools (Email, Ads, Blog)\n' +
+    '   - Mobile & UX (mobile-ready, chat, formularer)\n' +
+    '   - Giv score 1-5 med begrundelse\n\n' +
+    
+    '3. FINANSIEL VURDERING (2 linjer):\n' +
+    '   - Omsætning/ansatte i kontekst\n' +
+    '   - Hvad betyder det for AutoUncle potentiale?\n\n' +
+    
+    '4. KONKURRENCELANDSKAB (2 linjer):\n' +
+    '   - Hvem konkurrerer de med?\n' +
+    '   - Social media tilstedeværelse\n\n' +
+    
+    '5. SALGSMULIGHEDER (3-4 konkrete punkter):\n' +
+    '   - Identificer gaps i deres setup\n' +
+    '   - Hvad mangler de vs best practice?\n' +
+    '   - Hvordan kan AutoUncle hjælpe?\n\n' +
+    
+    '6. KEY QUESTIONS (2-3 spørgsmål):\n' +
+    '   - Strategiske spørgsmål til mødet\n' +
+    '   - Baseret på mangler/muligheder\n\n' +
+    
+    'FORMAT: Brug emojis, bulletpoints, vær skarp og konkret. Max 300 ord total. Skriv KUN briefingen, ingen introduktion.';
 
   var payload = {
     contents: [{ role: 'user', parts: [{ text: prompt }] }],
     generationConfig: { 
       temperature: 0.7, 
-      maxOutputTokens: 2000
+      maxOutputTokens: 4000  // Increased for comprehensive briefing
     }
   };
 
