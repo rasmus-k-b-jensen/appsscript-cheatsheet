@@ -1987,35 +1987,58 @@ function createSalesPitchPresentation() {
     return;
   }
   
-  // Hent data fra rækken
-  var data = sh.getRange(row, 1, 1, 25).getValues()[0];
+  // Hent data fra rækken - tilpasset til ny kolonnestruktur (33 kolonner A-AG)
+  var data = sh.getRange(row, 1, 1, 33).getValues()[0];
   
   var leadData = {
+    // GRUNDDATA (A-E: 1-5)
     url: data[0] || '',
     domain: data[1] || '',
     cvr: data[2] || '',
     phone: data[3] || '',
     email: data[4] || '',
-    ga4: data[5] || '',
-    gtm: data[6] || '',
-    metaPixel: data[7] || '',
-    googleAds: data[8] || '',
-    competitors: data[9] || '',
-    socialMedia: data[10] || '',
-    notes: data[11] || '',
-    aiBriefing: data[12] || '',
-    lastRun: data[13] || '',
-    ga4Ids: data[14] || '',
-    gtmIds: data[15] || '',
-    metaPixelIds: data[16] || '',
-    googleAdsIds: data[17] || '',
-    cmp: data[18] || '',
-    pagesScanned: data[19] || '',
-    proffUrl: data[20] || '',
-    adPlatforms: data[21] || '',
+    
+    // TEKNOLOGI & PLATFORM (F-J: 6-10)
+    websitePlatform: data[5] || '',
+    carDealerPlatform: data[6] || '',
+    mobileReady: data[7] || '',
+    cmp: data[8] || '',
+    chatWidget: data[9] || '',
+    
+    // TRACKING & ANALYTICS (K-Q: 11-17)
+    ga4: data[10] || '',
+    ga4Ids: data[11] || '',
+    gtm: data[12] || '',
+    gtmIds: data[13] || '',
+    metaPixel: data[14] || '',
+    metaPixelIds: data[15] || '',
+    googleAdsTag: data[16] || '',
+    
+    // MARKETING TOOLS (R-U: 18-21)
+    googleAdsAWIds: data[17] || '',
+    emailPlatform: data[18] || '',
+    contactForms: data[19] || '',
+    hasBlog: data[20] || '',
+    
+    // BUSINESS DATA (V-Y: 22-25)
+    proffUrl: data[21] || '',
     proffRevenue: data[22] || '',
     proffProfit: data[23] || '',
-    proffEmployees: data[24] || ''
+    proffEmployees: data[24] || '',
+    
+    // KONKURRENCE & SOCIAL (Z-AB: 26-28)
+    competitors: data[25] || '',
+    socialMedia: data[26] || '',
+    adPlatforms: data[27] || '',
+    
+    // MEDIA & INDHOLD (AC: 29)
+    videoMarketing: data[28] || '',
+    
+    // METADATA (AD-AG: 30-33)
+    pagesScanned: data[29] || '',
+    lastRun: data[30] || '',
+    aiBriefing: data[31] || '',  // Column AE (32) - struktureret AI analyse
+    notes: data[32] || ''
   };
   
   // Opret præsentationen
@@ -2029,35 +2052,38 @@ function createSalesPitchPresentation() {
       slides[0].remove();
     }
     
+    // Parse AI briefing til strukturerede sektioner
+    var aiSections = parseAiBriefing_(leadData.aiBriefing);
+    
     // Slide 1: Forside
-    createTitleSlide_(presentation, leadData);
+    createTitleSlide_(presentation, leadData, aiSections);
     
-    // Slide 2: Virksomhedsinfo
-    createCompanyInfoSlide_(presentation, leadData);
+    // Slide 2: Virksomhedsinfo (bruger AI section 1: COMPANY OVERVIEW)
+    createCompanyInfoSlide_(presentation, leadData, aiSections);
     
-    // Slide 3: Digital Modenhed
-    createDigitalMaturitySlide_(presentation, leadData);
+    // Slide 3: Digital Modenhed (bruger AI section 2: DIGITAL MODNING)
+    createDigitalMaturitySlide_(presentation, leadData, aiSections);
     
-    // Slide 4: Økonomiske Data (hvis tilgængelig)
-    if (leadData.proffRevenue || leadData.proffProfit || leadData.proffEmployees) {
-      createFinancialSlide_(presentation, leadData);
+    // Slide 4: Økonomiske Data (bruger AI section 3: FINANSIEL VURDERING)
+    if (leadData.proffRevenue || leadData.proffProfit || leadData.proffEmployees || aiSections.financial) {
+      createFinancialSlide_(presentation, leadData, aiSections);
     }
     
-    // Slide 5: AI Insights (hvis tilgængelig)
-    if (leadData.aiBriefing) {
-      createAiInsightsSlide_(presentation, leadData);
+    // Slide 5: Konkurrence (bruger AI section 4: KONKURRENCELANDSKAB)
+    if (leadData.competitors || leadData.socialMedia || aiSections.competitive) {
+      createCompetitiveSlide_(presentation, leadData, aiSections);
     }
     
-    // Slide 6: Muligheder & Next Steps
-    createOpportunitiesSlide_(presentation, leadData);
+    // Slide 6: Muligheder & Next Steps (bruger AI section 5: SALGSMULIGHEDER + 6: KEY QUESTIONS)
+    createOpportunitiesSlide_(presentation, leadData, aiSections);
     
     // Åbn præsentationen
     var url = 'https://docs.google.com/presentation/d/' + presentationId + '/edit';
     
-    // Gem URL i Notes
-    var currentNotes = sh.getRange(row, 12).getValue();
+    // Gem URL i Notes (kolonne AG = 33)
+    var currentNotes = sh.getRange(row, 33).getValue();
     var newNotes = currentNotes ? currentNotes + '\n[Pitch: ' + url + ']' : '[Pitch: ' + url + ']';
-    sh.getRange(row, 12).setValue(newNotes);
+    sh.getRange(row, 33).setValue(newNotes);
     
     // Vis HTML dialog med klikbart link
     var html = HtmlService.createHtmlOutput(
@@ -2076,9 +2102,60 @@ function createSalesPitchPresentation() {
 }
 
 /**
+ * Parser AI briefing til strukturerede sektioner
+ * Returnerer objekt med sektioner: overview, digital, financial, competitive, opportunities, questions
+ */
+function parseAiBriefing_(briefing) {
+  if (!briefing || briefing.indexOf('AI briefing:') !== -1) {
+    // Ingen valid briefing
+    return {
+      overview: '',
+      digital: '',
+      financial: '',
+      competitive: '',
+      opportunities: '',
+      questions: ''
+    };
+  }
+  
+  var sections = {
+    overview: '',
+    digital: '',
+    financial: '',
+    competitive: '',
+    opportunities: '',
+    questions: ''
+  };
+  
+  // Split på section headers (case-insensitive)
+  var text = briefing.toString();
+  
+  // Extract sections using regex patterns
+  var overviewMatch = text.match(/1\.\s*COMPANY OVERVIEW[:\s]*([^]*?)(?=\n\s*2\.|$)/i);
+  if (overviewMatch) sections.overview = overviewMatch[1].trim();
+  
+  var digitalMatch = text.match(/2\.\s*DIGITAL MOD[NØ]ING[:\s]*([^]*?)(?=\n\s*3\.|$)/i);
+  if (digitalMatch) sections.digital = digitalMatch[1].trim();
+  
+  var financialMatch = text.match(/3\.\s*FINANSIEL VURDERING[:\s]*([^]*?)(?=\n\s*4\.|$)/i);
+  if (financialMatch) sections.financial = financialMatch[1].trim();
+  
+  var competitiveMatch = text.match(/4\.\s*KONKURRENCEL[AØ]NDSKAB[:\s]*([^]*?)(?=\n\s*5\.|$)/i);
+  if (competitiveMatch) sections.competitive = competitiveMatch[1].trim();
+  
+  var opportunitiesMatch = text.match(/5\.\s*SALGSMULIGHEDER[:\s]*([^]*?)(?=\n\s*6\.|$)/i);
+  if (opportunitiesMatch) sections.opportunities = opportunitiesMatch[1].trim();
+  
+  var questionsMatch = text.match(/6\.\s*KEY QUESTIONS[:\s]*([^]*?)$/i);
+  if (questionsMatch) sections.questions = questionsMatch[1].trim();
+  
+  return sections;
+}
+
+/**
  * Forside slide
  */
-function createTitleSlide_(presentation, data) {
+function createTitleSlide_(presentation, data, aiSections) {
   var slide = presentation.appendSlide(SlidesApp.PredefinedLayout.TITLE);
   var shapes = slide.getShapes();
   
@@ -2092,129 +2169,164 @@ function createTitleSlide_(presentation, data) {
 }
 
 /**
- * Virksomhedsinfo slide
+ * Virksomhedsinfo slide - bruger AI COMPANY OVERVIEW
  */
-function createCompanyInfoSlide_(presentation, data) {
+function createCompanyInfoSlide_(presentation, data, aiSections) {
   var slide = presentation.appendSlide(SlidesApp.PredefinedLayout.TITLE_AND_BODY);
   var shapes = slide.getShapes();
   
   shapes[0].getText().setText('Virksomhedsinfo');
   
   var content = '';
-  if (data.domain) content += '🌐 Website: ' + data.domain + '\n';
+  
+  // Brug AI overview hvis tilgængelig
+  if (aiSections.overview) {
+    content += '🤖 AI ANALYSE:\n' + aiSections.overview + '\n\n';
+  }
+  
+  // Tilføj nøgledata
+  content += '📊 KONTAKTDATA:\n';
+  if (data.domain) content += '🌐 ' + data.domain + '\n';
   if (data.cvr) content += '🏢 CVR: ' + data.cvr + '\n';
-  if (data.phone) content += '📞 Telefon: ' + data.phone + '\n';
-  if (data.email) content += '✉️ Email: ' + data.email + '\n';
-  if (data.proffUrl) content += '📊 Proff.dk: ' + data.proffUrl + '\n';
-  if (data.pagesScanned) content += '\n📄 Sider scannet: ' + data.pagesScanned;
+  if (data.phone) content += '📞 ' + data.phone + '\n';
+  if (data.email) content += '✉️ ' + data.email + '\n';
   
-  shapes[1].getText().setText(content || 'Ingen kontaktinfo fundet');
+  if (data.websitePlatform || data.carDealerPlatform) {
+    content += '\n💻 PLATFORM:\n';
+    if (data.carDealerPlatform) content += '🚗 ' + data.carDealerPlatform + '\n';
+    else if (data.websitePlatform) content += '🌐 ' + data.websitePlatform + '\n';
+  }
+  
+  shapes[1].getText().setText(content || 'Ingen data tilgængelig');
 }
 
 /**
- * Digital modenhed slide
+ * Digital modenhed slide - bruger AI DIGITAL MODNING
  */
-function createDigitalMaturitySlide_(presentation, data) {
-  var slide = presentation.appendSlide(SlidesApp.PredefinedLayout.TITLE_AND_TWO_COLUMNS);
-  var shapes = slide.getShapes();
-  
-  shapes[0].getText().setText('Digital Modenhed & Tracking');
-  
-  // Venstre kolonne: Analytics
-  var analyticsContent = '📊 ANALYTICS\n\n';
-  analyticsContent += data.ga4 ? '✅ Google Analytics 4\n' : '❌ Google Analytics 4\n';
-  analyticsContent += data.gtm ? '✅ Google Tag Manager\n' : '❌ Google Tag Manager\n';
-  analyticsContent += data.metaPixel ? '✅ Meta Pixel\n' : '❌ Meta Pixel\n';
-  if (data.cmp) analyticsContent += '✅ Consent Management\n';
-  
-  shapes[1].getText().setText(analyticsContent);
-  
-  // Højre kolonne: Marketing
-  var marketingContent = '🎯 MARKETING\n\n';
-  marketingContent += data.googleAds ? '✅ Google Ads\n' : '❌ Google Ads\n';
-  if (data.adPlatforms) marketingContent += '📱 Platforme: ' + data.adPlatforms + '\n';
-  if (data.socialMedia) marketingContent += '🌐 Sociale medier: ' + data.socialMedia + '\n';
-  if (data.competitors) marketingContent += '\n🔍 Konkurrenter:\n' + data.competitors;
-  
-  shapes[2].getText().setText(marketingContent);
-}
-
-/**
- * Økonomiske data slide
- */
-function createFinancialSlide_(presentation, data) {
+function createDigitalMaturitySlide_(presentation, data, aiSections) {
   var slide = presentation.appendSlide(SlidesApp.PredefinedLayout.TITLE_AND_BODY);
   var shapes = slide.getShapes();
   
-  shapes[0].getText().setText('Økonomiske Nøgletal');
+  shapes[0].getText().setText('Digital Modenhed');
   
-  var content = '💰 REGNSKABSDATA (Fra Proff.dk)\n\n';
+  var content = '';
   
-  if (data.proffRevenue) {
-    content += '📈 Omsætning: ' + data.proffRevenue + ' kr.\n';
+  // Brug AI's digital maturity vurdering hvis tilgængelig
+  if (aiSections.digital) {
+    content += '🤖 AI VURDERING:\n' + aiSections.digital + '\n\n';
   }
   
-  if (data.proffProfit) {
-    content += '💵 Resultat: ' + data.proffProfit + ' kr.\n';
-  }
+  // Tilføj quick facts
+  content += '📊 STATUS OVERSIGT:\n';
+  content += data.ga4 === 'Ja' ? '✅ GA4' : '❌ GA4';
+  content += ' | ';
+  content += data.gtm === 'Ja' ? '✅ GTM' : '❌ GTM';
+  content += ' | ';
+  content += data.metaPixel === 'Ja' ? '✅ Meta Pixel' : '❌ Meta Pixel';
+  content += '\n';
   
-  if (data.proffEmployees) {
-    content += '👥 Ansatte: ' + data.proffEmployees + ' personer\n';
-  }
-  
-  content += '\n💡 Dette indikerer virksomhedens størrelse og kapacitet til at investere i digitale løsninger.';
+  if (data.mobileReady) content += '📱 Mobile: ' + data.mobileReady + '\n';
+  if (data.chatWidget) content += '💬 Chat: ' + data.chatWidget + '\n';
+  if (data.emailPlatform) content += '📧 Email: ' + data.emailPlatform + '\n';
+  if (data.hasBlog) content += '📝 Blog: ' + data.hasBlog + '\n';
+  if (data.videoMarketing) content += '🎬 Video: ' + data.videoMarketing + '\n';
   
   shapes[1].getText().setText(content);
 }
 
 /**
- * AI insights slide
+ * Økonomiske data slide - bruger AI FINANSIEL VURDERING
  */
-function createAiInsightsSlide_(presentation, data) {
+function createFinancialSlide_(presentation, data, aiSections) {
   var slide = presentation.appendSlide(SlidesApp.PredefinedLayout.TITLE_AND_BODY);
   var shapes = slide.getShapes();
   
-  shapes[0].getText().setText('AI Analyse');
+  shapes[0].getText().setText('Økonomisk Kontekst');
   
-  // Trim AI briefing hvis den er for lang
-  var briefing = data.aiBriefing;
-  if (briefing.length > 800) {
-    briefing = briefing.substring(0, 800) + '...';
+  var content = '';
+  
+  // Brug AI's finansielle analyse
+  if (aiSections.financial) {
+    content += '🤖 AI ANALYSE:\n' + aiSections.financial + '\n\n';
   }
   
-  shapes[1].getText().setText('🤖 GEMINI INSIGHTS\n\n' + briefing);
+  // Tilføj rådata
+  content += '💰 NØGLETAL (Proff.dk):\n';
+  if (data.proffRevenue) content += '📈 Omsætning: ' + data.proffRevenue + '\n';
+  if (data.proffProfit) content += '💵 Resultat: ' + data.proffProfit + '\n';
+  if (data.proffEmployees) content += '👥 Ansatte: ' + data.proffEmployees + '\n';
+  
+  shapes[1].getText().setText(content);
 }
 
 /**
- * Muligheder og next steps slide
+ * Konkurrencelandskab slide - bruger AI KONKURRENCELANDSKAB
  */
-function createOpportunitiesSlide_(presentation, data) {
+function createCompetitiveSlide_(presentation, data, aiSections) {
   var slide = presentation.appendSlide(SlidesApp.PredefinedLayout.TITLE_AND_BODY);
   var shapes = slide.getShapes();
   
-  shapes[0].getText().setText('Muligheder & Next Steps');
+  shapes[0].getText().setText('Konkurrence & Marked');
   
-  var content = '🎯 ANBEFALINGER\n\n';
+  var content = '';
   
-  // Generer anbefalinger baseret på manglende tracking
-  var recommendations = [];
-  
-  if (!data.ga4) recommendations.push('• Implementer Google Analytics 4 for bedre dataindsigt');
-  if (!data.gtm) recommendations.push('• Opsæt Google Tag Manager for fleksibel tracking');
-  if (!data.metaPixel && !data.googleAds) recommendations.push('• Start med paid advertising (Meta/Google Ads)');
-  if (!data.cmp) recommendations.push('• Implementer Consent Management (GDPR compliance)');
-  if (data.competitors) recommendations.push('• Konkurrentanalyse: Lær af ' + data.competitors.split(',')[0]);
-  
-  if (recommendations.length > 0) {
-    content += recommendations.join('\n') + '\n';
-  } else {
-    content += '✅ Virksomheden har allerede god digital modenhed!\n\n';
-    content += '• Optimer eksisterende tracking\n';
-    content += '• Analyser conversion funnels\n';
-    content += '• Test nye marketing kanaler\n';
+  // Brug AI's competitive analyse
+  if (aiSections.competitive) {
+    content += '🤖 AI ANALYSE:\n' + aiSections.competitive + '\n\n';
   }
   
-  content += '\n📞 NEXT STEP: Book et møde for at diskutere disse muligheder';
+  // Tilføj konkurrentdata
+  content += '🏁 KONKURRENTER:\n';
+  if (data.competitors) {
+    content += data.competitors + '\n';
+  } else {
+    content += 'Ingen identificeret\n';
+  }
+  
+  content += '\n🌐 SOCIAL MEDIA:\n';
+  if (data.socialMedia) {
+    content += data.socialMedia + '\n';
+  } else {
+    content += 'Ingen kanaler fundet\n';
+  }
+  
+  if (data.adPlatforms) {
+    content += '\n📱 AD PLATFORMS:\n' + data.adPlatforms;
+  }
+  
+  shapes[1].getText().setText(content);
+}
+
+/**
+ * Muligheder og next steps slide - bruger AI SALGSMULIGHEDER + KEY QUESTIONS
+ */
+function createOpportunitiesSlide_(presentation, data, aiSections) {
+  var slide = presentation.appendSlide(SlidesApp.PredefinedLayout.TITLE_AND_BODY);
+  var shapes = slide.getShapes();
+  
+  shapes[0].getText().setText('Muligheder & Næste Skridt');
+  
+  var content = '';
+  
+  // Brug AI's sales opportunities
+  if (aiSections.opportunities) {
+    content += '🎯 SALGSMULIGHEDER:\n' + aiSections.opportunities + '\n\n';
+  } else {
+    // Fallback til basic recommendations
+    content += '🎯 ANBEFALINGER:\n';
+    if (data.ga4 !== 'Ja') content += '• Implementer Google Analytics 4\n';
+    if (data.gtm !== 'Ja') content += '• Opsæt Google Tag Manager\n';
+    if (data.metaPixel !== 'Ja') content += '• Tilføj Meta Pixel tracking\n';
+    if (!data.chatWidget) content += '• Overvej chat widget\n';
+    content += '\n';
+  }
+  
+  // Tilføj AI's key questions
+  if (aiSections.questions) {
+    content += '❓ SPØRGSMÅL TIL MØDET:\n' + aiSections.questions;
+  } else {
+    content += '📞 NEXT STEP: Book møde for at diskutere muligheder';
+  }
   
   shapes[1].getText().setText(content);
 }
