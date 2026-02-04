@@ -73,11 +73,23 @@ function onOpen() {
     .addItem('🤖 Generate AI Briefing (selected)', 'generateAiBriefingForSelection')
     .addItem('📊 Create Sales Pitch (selected)', 'createSalesPitchPresentation')
     .addSeparator()
+    .addSubMenu(ui.createMenu('⭐ Lead Scoring')
+      .addItem('Beregn Score (selected)', 'updateLeadScore')
+      .addItem('Beregn Scores (alle)', 'scoreAllLeads'))
     .addSubMenu(ui.createMenu('⚙️ Gemini AI Setup')
       .addItem('Setup API Key', 'setupGeminiApiKey')
       .addItem('Test API Key', 'testGeminiApiKey')
       .addItem('Fjern API Key', 'removeGeminiApiKey'))
-    .addSubMenu(ui.createMenu('📊 Analytics')
+    .addSubMenu(ui.createMenu('� AutoUncle Integration')
+      .addItem('Setup Admin Login', 'setupAutoUncleSession')
+      .addItem('Sync Customer List', 'syncAutoUncleCustomers')
+      .addItem('Test Connection', 'testAutoUncleConnectionMenu'))
+    .addSubMenu(ui.createMenu('🚗 Bilinfo API')
+      .addItem('Setup API Credentials', 'setupBilinfoCredentials')
+      .addItem('Sync Forhandler Data', 'syncBilinfoData')
+      .addItem('Opret Bilinfo Ark', 'createBilinfoSheet')
+      .addItem('Test API Connection', 'testBilinfoConnection'))
+    .addSubMenu(ui.createMenu('�📊 Analytics')
       .addItem('Tracking statistik', 'analyzeTrackingStats')
       .addItem('Konkurrent analyse', 'analyzeCompetitors'))
     .addSubMenu(ui.createMenu('🔍 Data Quality')
@@ -109,10 +121,10 @@ function setupHeaders() {
       'Proff link','Proff Omsætning','Proff Resultat','Proff Ansatte',
       // KONKURRENCE & SOCIAL (Z-AB)
       'Competitors found','Social Media','Ad Platforms',
-      // MEDIA & INDHOLD (AC)
-      'Video Marketing',
-      // METADATA (AD-AG)
-      'Pages scanned','Last run','AI Briefing','Notes'
+      // MEDIA & INDHOLD (AC-AF)
+      'Video Marketing','Bilmærker','Trustpilot Rating','Bil Salgsplatforme',
+      // METADATA (AG-AM)
+      'Pages scanned','Last run','AI Briefing','Notes','AutoUncle Admin','Bilinfo Antal','Afdelinger (Bilinfo)'
     ];
 
     sh.getRange(1, 1, 1, headers.length).setValues([headers]);
@@ -280,8 +292,21 @@ function runMvpForRow_(sh, row) {
       return;
     }
 
-  var ga4Status = result.ga4Ids.length ? 'Yes' : (result.ga4LikelyViaJs ? 'Likely' : 'No');
-  var ga4IdsDisplay = result.ga4Ids.length ? result.ga4Ids.join(', ') : (result.ga4LikelyViaJs ? 'Manual review needed' : '');
+  // Smartere GA4 status
+  var ga4Status = 'No';
+  var ga4IdsDisplay = '';
+  
+  if (result.ga4Ids.length) {
+    ga4Status = 'Ja';
+    ga4IdsDisplay = result.ga4Ids.join(', ');
+  } else if (result.gtmIds.length) {
+    // Hvis GTM findes, antag at GA4 sandsynligvis ER installeret via GTM
+    ga4Status = 'Sandsynligvis (via GTM)';
+    ga4IdsDisplay = '';
+  } else if (result.ga4LikelyViaJs) {
+    ga4Status = 'Sandsynligvis (via JS)';
+    ga4IdsDisplay = '';
+  }
   
   // GRUNDDATA (C-E: 3 cols)
   var batchData1 = [[
@@ -344,19 +369,35 @@ function runMvpForRow_(sh, row) {
   ]];
   sh.getRange(row, 26, 1, 3).setValues(batchData5);
   
-  // MEDIA & INDHOLD (AC: 1 col)
-  sh.getRange(row, 29).setValue(result.videoMarketing || '');  // AC: Video Marketing
-  
-  // METADATA (AD-AG: 4 cols) - AD (Pages scanned) and AF (Last run) set, skip AE (AI Briefing) and AG (Notes)
+  // MEDIA & INDHOLD (AC-AF: 4 cols)
   var batchData6 = [[
-    result.pagesScanned.join(' | '),           // AD: Pages scanned
-    new Date()                                  // AF: Last run
+    result.videoMarketing || '',                // AC: Video Marketing
+    result.carBrands || '',                     // AD: Bilmærker
+    result.trustpilot || '',                    // AE: Trustpilot Rating
+    result.carMarketplaces || ''                // AF: Bil Salgsplatforme
   ]];
-  sh.getRange(row, 30, 1, 1).setValues([[result.pagesScanned.join(' | ')]]);  // AD
-  sh.getRange(row, 31, 1, 1).setValues([[new Date()]]);                        // AF
-  // AG (33): Notes - set separately when there are notes
-  if (result.notes.length > 0) {
-    sh.getRange(row, 33).setValue(result.notes.join(' | '));
+  sh.getRange(row, 29, 1, 4).setValues(batchData6);
+  
+  // METADATA (AG-AM: 7 cols) - AG (Pages scanned), AH (Last run), skip AI (35) and AJ (36), AK (AutoUncle Admin), AL (Bilinfo Antal), AM (Afdelinger Bilinfo)
+  sh.getRange(row, 33, 1, 1).setValues([[result.pagesScanned.join(' | ')]]);  // AG: Pages scanned
+  sh.getRange(row, 34, 1, 1).setValues([[new Date()]]);                        // AH: Last run
+  sh.getRange(row, 37, 1, 1).setValues([[result.autoUncleStatus || '']]);     // AK: AutoUncle Admin
+  
+  // AL & AM: Bilinfo Antal + Afdelinger - Fetch from Bilinfo API
+  Logger.log('Attempting to fetch Bilinfo data for domain: ' + domain);
+  var bilinfoData = fetchBilinfoCountForDomain_(domain);
+  Logger.log('Bilinfo data result: ' + JSON.stringify(bilinfoData));
+  if (bilinfoData !== null) {
+    sh.getRange(row, 38, 1, 1).setValues([[bilinfoData.totalCount]]);  // AL: Bilinfo Antal
+    sh.getRange(row, 39, 1, 1).setValues([[bilinfoData.departmentCount]]);  // AM: Afdelinger (Bilinfo)
+    Logger.log('Wrote Bilinfo data - Biler: ' + bilinfoData.totalCount + ', Afdelinger: ' + bilinfoData.departmentCount);
+  } else {
+    Logger.log('Bilinfo data was null, not writing to sheet');
+  }
+  
+  // AJ (36): Notes - set separately
+  if (result.notes) {
+    sh.getRange(row, 36).setValue(result.notes);
   }
   
   // Update headers with accounting year if available
@@ -368,8 +409,8 @@ function runMvpForRow_(sh, row) {
     // Generel error handling for hele funktionen
     var errorMsg = 'Error: ' + (e.message || e);
     try {
-      sh.getRange(row, 33).setValue(errorMsg); // Notes (AG)
-      sh.getRange(row, 31).setValue(new Date()); // Last run (AF)
+      sh.getRange(row, 36).setValue(errorMsg); // Notes (AJ)
+      sh.getRange(row, 34).setValue(new Date()); // Last run (AH)
     } catch (e2) {
       Logger.log('Cannot write error to row ' + row + ': ' + e2.message);
     }
@@ -480,12 +521,15 @@ function generateAiBriefingForRow_(sh, row) {
     socialMedia: (sh.getRange(row, 27).getValue() || '').toString().split(',').map(function(s) { return s.trim(); }).filter(Boolean),
     adPlatforms: (sh.getRange(row, 28).getValue() || '').toString().split(',').map(function(s) { return s.trim(); }).filter(Boolean),
     
-    // MEDIA & INDHOLD (AC)
-    videoMarketing: sh.getRange(row, 29).getValue() || ''
+    // MEDIA & INDHOLD (AC-AF)
+    videoMarketing: sh.getRange(row, 29).getValue() || '',
+    carBrands: sh.getRange(row, 30).getValue() || '',
+    trustpilot: sh.getRange(row, 31).getValue() || '',
+    carMarketplaces: sh.getRange(row, 32).getValue() || ''
   };
   
   var briefing = generateBriefingGemini_(url, result);
-  sh.getRange(row, 32).setValue(briefing);
+  sh.getRange(row, 35).setValue(briefing);  // AI kolonne (AI Briefing)
 }
 
 function scanWebsite_(url, maxPages) {
@@ -573,32 +617,38 @@ function scanWebsite_(url, maxPages) {
 
   // Detect if GA4 is likely loaded via JavaScript (even if no ID found in static HTML)
   var ga4LikelyViaJs = false;
-  if (ga4Ids.length === 0) {
-    // Check for indicators that GA4 might be loaded dynamically
+  if (ga4Ids.length === 0 && gtmIds.length === 0) {
+    // Only check for JS indicators if NEITHER GA4 nor GTM is found
     var hasGtagScript = /googletagmanager\.com\/gtag\/js/i.test(allHtml);
     var hasDataLayer = /dataLayer/i.test(allHtml);
     var hasGtagFunction = /gtag\s*\(/i.test(allHtml);
     var hasAnalyticsReference = /google-analytics|googleanalytics|analytics\.js/i.test(allHtml);
     
-    // If GTM + CMP or gtag references exist, GA4 is likely loaded after consent
-    if ((gtmIds.length && cmpVendors.length) || hasGtagScript || (hasDataLayer && hasGtagFunction) || hasAnalyticsReference) {
+    // If any gtag/analytics references exist, tracking is likely present
+    if (hasGtagScript || (hasDataLayer && hasGtagFunction) || hasAnalyticsReference) {
       ga4LikelyViaJs = true;
     }
   }
 
   // Notes (sales-friendly)
   var notes = [];
-  if (gtmIds.length && !ga4Ids.length && !ga4LikelyViaJs) {
-    notes.push('GTM detected, but GA4 ID not visible in HTML (GA4 may be configured via GTM).');
+  
+  // GA4/GTM tracking notes
+  if (gtmIds.length && ga4Ids.length) {
+    notes.push('✅ Både GTM og GA4 hardcoded i HTML - fuld tracking synlig.');
+  } else if (gtmIds.length && !ga4Ids.length) {
+    notes.push('✅ GTM fundet - GA4 er sandsynligvis installeret via GTM (bedste praksis).');
+  } else if (ga4Ids.length && !gtmIds.length) {
+    notes.push('⚠️ GA4 hardcoded uden GTM - overvej at bruge GTM for bedre tag management.');
   } else if (ga4LikelyViaJs) {
-    notes.push('GA4 likely loaded via JavaScript/GTM after consent - manual review recommended.');
-  } else if (!gtmIds.length && !ga4Ids.length) {
-    notes.push('No GA4/GTM IDs detected in scanned HTML (could still be loaded via JS).');
+    notes.push('🔍 Tracking scripts fundet (gtag.js/dataLayer) - GA4 sandsynligvis loadet via JavaScript.');
+  } else {
+    notes.push('❌ Ingen synlig tracking (GA4/GTM) i HTML - mulighed for at implementere.');
   }
-  if (gtmIds.length && ga4Ids.length) notes.push('Both GTM and GA4 detected (check for double tagging).');
-  if (metaPixelIds.length) notes.push('Meta Pixel present (paid/retargeting signal).');
-  if (awIds.length) notes.push('Google Ads tag present (paid/remarketing signal).');
-  if (cmpVendors.length) notes.push('CMP/Cookie vendor detected: ' + cmpVendors.join(', '));
+  
+  if (metaPixelIds.length) notes.push('✅ Meta Pixel installeret (' + metaPixelIds.length + ' pixel).');
+  if (awIds.length) notes.push('✅ Google Ads tracking aktiv (' + awIds.length + ' tags).');
+  if (cmpVendors.length) notes.push('✅ Cookie consent: ' + cmpVendors.join(', '));
   if (competitors.length) notes.push('Competitor footprints found.');
   if (socialMedia.length) notes.push('Social media presence: ' + socialMedia.join(', '));
   if (adPlatforms.length) notes.push('Ad platforms detected: ' + adPlatforms.join(', '));
@@ -611,8 +661,18 @@ function scanWebsite_(url, maxPages) {
   var chatWidget = detectChatWidget_(allHtml);
   var contactForms = countContactForms_(allHtml);
   var hasBlog = detectBlog_(allHtml);
-  var videoMarketing = detectVideoMarketing_(allHtml);
+  var videoMarketing = detectVideoMarketingEnhanced_(allHtml);
   var emailPlatform = detectEmailPlatform_(allHtml);
+  var carBrands = detectCarBrands_(allHtml);
+  var trustpilot = detectTrustpilot_(allHtml);
+  
+  // Extract domain from base URL for marketplace detection
+  var domain = baseUrl.replace(/^https?:\/\/(www\.)?/, '').replace(/\/.*$/, '');
+  var carMarketplaces = detectCarMarketplacePlatforms_(allHtml, domain);
+  
+  // Extract dealer name from domain for AutoUncle check
+  var dealerName = domain.replace(/\.(dk|com|no|se)$/, '');
+  var autoUncleStatus = checkAutoUncleAdmin_(dealerName, domain);
 
   return {
     cvr: cvr,
@@ -627,8 +687,6 @@ function scanWebsite_(url, maxPages) {
     competitors: competitors,
     socialMedia: socialMedia,
     adPlatforms: adPlatforms,
-    pagesScanned: pagesScanned,
-    notes: notes,
     websitePlatform: websitePlatform,
     carDealerPlatform: carDealerPlatform,
     mobileReady: mobileReady,
@@ -636,7 +694,13 @@ function scanWebsite_(url, maxPages) {
     contactForms: contactForms,
     hasBlog: hasBlog,
     videoMarketing: videoMarketing,
-    emailPlatform: emailPlatform
+    emailPlatform: emailPlatform,
+    carBrands: carBrands,
+    trustpilot: trustpilot,
+    carMarketplaces: carMarketplaces,
+    autoUncleStatus: autoUncleStatus,
+    notes: notes.join(' | '),
+    pagesScanned: pagesScanned
   };
 }
 
@@ -1172,12 +1236,18 @@ function detectVideoMarketing_(html) {
  */
 function detectEmailPlatform_(html) {
   var platforms = [
-    { name: 'Mailchimp', patterns: ['mailchimp.com', 'mc.us'] },
-    { name: 'ActiveCampaign', patterns: ['activecampaign.com'] },
+    { name: 'Mailchimp', patterns: ['mailchimp.com', 'mc.us', 'list-manage.com'] },
+    { name: 'ActiveCampaign', patterns: ['activecampaign.com', 'activehosted.com'] },
     { name: 'GetResponse', patterns: ['getresponse.com'] },
-    { name: 'Klaviyo', patterns: ['klaviyo.com'] },
+    { name: 'Klaviyo', patterns: ['klaviyo.com', 'a.klaviyo.com'] },
     { name: 'SendGrid', patterns: ['sendgrid.com', 'sendgrid.net'] },
-    { name: 'HubSpot', patterns: ['hubspot.com', 'hs-scripts.com'] }
+    { name: 'HubSpot', patterns: ['hubspot.com', 'hs-scripts.com', 'hs-banner.com', 'hsforms.com'] },
+    { name: 'Brevo (Sendinblue)', patterns: ['sendinblue.com', 'brevo.com'] },
+    { name: 'Omnisend', patterns: ['omnisend.com'] },
+    { name: 'Customer.io', patterns: ['customer.io', 'customerio'] },
+    { name: 'ConvertKit', patterns: ['convertkit.com'] },
+    { name: 'Drip', patterns: ['drip.com', 'getdrip.com'] },
+    { name: 'Campaign Monitor', patterns: ['createsend.com', 'campaignmonitor.com'] }
   ];
   
   for (var i = 0; i < platforms.length; i++) {
@@ -1217,6 +1287,310 @@ function detectCarDealerPlatform_(html) {
     }
   }
   return 'Ingen';
+}
+
+/**
+ * Detect car brands/makes sold by dealer
+ * @param {string} html - The HTML content to search
+ * @return {string} Comma-separated list of brands or 'Ingen'
+ */
+function detectCarBrands_(html) {
+  var brands = [
+    'BMW', 'Mercedes', 'Audi', 'Volkswagen', 'VW', 'Toyota', 'Ford', 'Volvo',
+    'Opel', 'Peugeot', 'Citroën', 'Renault', 'Nissan', 'Mazda', 'Honda',
+    'Hyundai', 'Kia', 'Skoda', 'Seat', 'Fiat', 'Alfa Romeo', 'Jeep',
+    'Tesla', 'Porsche', 'Land Rover', 'Range Rover', 'Jaguar', 'Mini',
+    'Lexus', 'Suzuki', 'Mitsubishi', 'Subaru', 'Dacia', 'MG'
+  ];
+  
+  var found = [];
+  var lowerHtml = html.toLowerCase();
+  
+  for (var i = 0; i < brands.length; i++) {
+    var brand = brands[i];
+    var lowerBrand = brand.toLowerCase();
+    
+    // Søg efter brand med word boundaries (ikke del af andet ord)
+    var patterns = [
+      new RegExp('\\b' + lowerBrand + '\\b', 'i'),
+      new RegExp(lowerBrand + '[-\\s]', 'i'),
+      new RegExp('>' + lowerBrand + '<', 'i')
+    ];
+    
+    for (var j = 0; j < patterns.length; j++) {
+      if (patterns[j].test(html)) {
+        if (!contains_(found, brand)) {
+          found.push(brand);
+        }
+        break;
+      }
+    }
+  }
+  
+  // Sorter alfabetisk
+  found.sort();
+  
+  return found.length > 0 ? found.join(', ') : 'Ingen';
+}
+
+/**
+ * Detect Trustpilot rating
+ * @param {string} html - The HTML content to search
+ * @return {string} Rating with review count or 'Ingen'
+ */
+function detectTrustpilot_(html) {
+  // Find Trustpilot widget or link
+  var hasTrustpilot = /trustpilot\.com/i.test(html);
+  
+  if (!hasTrustpilot) return 'Ingen';
+  
+  // Try to extract rating if visible in HTML
+  var ratingPatterns = [
+    /"ratingValue"\s*:\s*"?([\d.]+)"?/i,
+    /trustScore['"]\s*:\s*"?([\d.]+)"?/i,
+    /stars:\s*"?([\d.]+)"?/i
+  ];
+  
+  for (var i = 0; i < ratingPatterns.length; i++) {
+    var match = html.match(ratingPatterns[i]);
+    if (match && match[1]) {
+      var rating = parseFloat(match[1]);
+      if (rating >= 1 && rating <= 5) {
+        return rating.toFixed(1) + '★';
+      }
+    }
+  }
+  
+  // If widget found but no rating, just confirm presence
+  return 'Ja (rating skal verificeres manuelt)';
+}
+
+/**
+ * Improved video marketing detection with YouTube channel support
+ * @param {string} html - The HTML content to search
+ * @return {string} Video platforms with details or 'Ingen'
+ */
+function detectVideoMarketingEnhanced_(html) {
+  var results = [];
+  
+  // YouTube detection
+  var youtubeEmbeds = (html.match(/youtube\.com\/embed/gi) || []).length;
+  var youtubeWatch = (html.match(/youtube\.com\/watch/gi) || []).length;
+  var youtubeShort = (html.match(/youtu\.be\//gi) || []).length;
+  var youtubeChannel = html.match(/youtube\.com\/(channel\/|@|c\/)([a-zA-Z0-9_-]+)/i);
+  
+  if (youtubeChannel || youtubeEmbeds || youtubeWatch || youtubeShort) {
+    var ytText = 'YouTube';
+    var totalVids = youtubeEmbeds + youtubeWatch + youtubeShort;
+    if (totalVids > 0) ytText += ' (' + totalVids + ' videos)';
+    if (youtubeChannel) ytText += ' [Kanal: ' + youtubeChannel[2] + ']';
+    results.push(ytText);
+  }
+  
+  // Vimeo detection
+  var vimeoMatches = (html.match(/vimeo\.com/gi) || []).length;
+  if (vimeoMatches > 0) {
+    results.push('Vimeo (' + vimeoMatches + ')');
+  }
+  
+  // Wistia detection
+  var wistiaMatches = (html.match(/wistia\.com|fast\.wistia\.net/gi) || []).length;
+  if (wistiaMatches > 0) {
+    results.push('Wistia (' + wistiaMatches + ')');
+  }
+  
+  return results.length > 0 ? results.join(', ') : 'Ingen';
+}
+
+/**
+ * Detects if car dealer markets their inventory on various car marketplace platforms.
+ * Uses search URLs to check if dealer has active listings.
+ * Returns formatted text with hyperlinks and counts.
+ * @param {string} html - HTML content to analyze
+ * @param {string} domain - Domain name (e.g., "ring-biler.dk")
+ * @return {string} Formatted text with platform links, or 'Ingen'
+ */
+function detectCarMarketplacePlatforms_(html, domain) {
+  if (!html || !domain) return 'Ingen';
+  
+  var results = [];
+  var lowerHtml = html.toLowerCase();
+  
+  // Extract dealer name from domain (remove .dk/.com etc)
+  var dealerName = domain.replace(/\.(dk|com|net|org)$/i, '').toLowerCase();
+  
+  // Create variations - only full name with/without dash
+  var nameVariations = [
+    dealerName,                           // ring-biler (original)
+    dealerName.replace(/-/g, '')          // ringbiler (no dash)
+  ];
+  
+  // AutoUncle - check paa_gensyn pattern
+  var autouncleUrl = '';
+  var autouncleFound = false;
+  
+  // Pattern in HTML
+  if (lowerHtml.indexOf('autouncle.dk/da/paa_gensyn/' + dealerName + '-dk') > -1 ||
+      lowerHtml.indexOf('autouncle.dk/da/paa_gensyn/' + dealerName + '.dk') > -1) {
+    autouncleFound = true;
+    autouncleUrl = 'https://www.autouncle.dk/da/paa_gensyn/' + dealerName + '-dk';
+  }
+  
+  // Try direct URL check
+  if (!autouncleFound) {
+    for (var i = 0; i < nameVariations.length; i++) {
+      var auUrl = 'https://www.autouncle.dk/da/paa_gensyn/' + nameVariations[i] + '-dk';
+      var auCount = getCarCount_(auUrl, 'autouncle');
+      if (auCount > 0) {
+        autouncleFound = true;
+        autouncleUrl = auUrl;
+        results.push('AutoUncle (' + auCount + '): ' + auUrl);
+        break;
+      }
+    }
+  }
+  if (autouncleFound && !results.length) {
+    results.push('AutoUncle: ' + autouncleUrl);
+  }
+  
+  // Bilbasen - check search URL
+  var bilbasenUrl = '';
+  var bilbasenFound = false;
+  
+  for (var j = 0; j < nameVariations.length; j++) {
+    var bbUrl = 'https://www.bilbasen.dk/brugt/bil?free=' + nameVariations[j];
+    var bbCount = getCarCount_(bbUrl, 'bilbasen');
+    if (bbCount > 0) {
+      bilbasenFound = true;
+      bilbasenUrl = bbUrl;
+      results.push('Bilbasen (' + bbCount + '): ' + bbUrl);
+      break;
+    }
+  }
+  
+  // Bilhandel
+  if (lowerHtml.indexOf('bilhandel.dk/forhandler/') > -1 || 
+      (lowerHtml.indexOf('bilhandel.dk/') > -1 && lowerHtml.indexOf('biler-til-salg') > -1)) {
+    results.push('Bilhandel');
+  }
+  
+  // Biltorvet
+  if (lowerHtml.indexOf('biltorvet.dk/forhandler/') > -1 || 
+      (lowerHtml.indexOf('biltorvet.dk/') > -1 && lowerHtml.indexOf('soeg/forhandler') > -1)) {
+    results.push('Biltorvet');
+  }
+  
+  // dba.dk
+  if (lowerHtml.indexOf('dba.dk/butik/') > -1 || 
+      (lowerHtml.indexOf('dba.dk/') > -1 && lowerHtml.indexOf('bilforhandler') > -1)) {
+    results.push('dba.dk');
+  }
+  
+  // dgs.dk
+  if (lowerHtml.indexOf('dgs.dk/find-forhandler/') > -1 || 
+      (lowerHtml.indexOf('dgs.dk/') > -1 && lowerHtml.indexOf('forhandler') > -1)) {
+    results.push('dgs.dk');
+  }
+  
+  return results.length > 0 ? results.join(' | ') : 'Ingen';
+}
+
+/**
+ * Gets the number of cars listed on a marketplace platform.
+ * @param {string} url - Search URL to check
+ * @param {string} platform - Platform name ('bilbasen' or 'autouncle')
+ * @return {number} Number of cars found, or 0 if none/error
+ */
+function getCarCount_(url, platform) {
+  try {
+    var response = UrlFetchApp.fetch(url, {
+      method: 'get',
+      muteHttpExceptions: true,
+      followRedirects: true
+    });
+    
+    var code = response.getResponseCode();
+    if (code < 200 || code >= 300) return 0;
+    
+    var content = response.getContentText();
+    
+    // Extract count based on platform
+    if (platform === 'bilbasen') {
+      // Bilbasen shows: "Viser: 42.945 biler til salg" or similar
+      var match = content.match(/Viser:\s*([\d.]+)\s*biler/i);
+      if (match) {
+        return parseInt(match[1].replace(/\./g, ''));
+      }
+    } else if (platform === 'autouncle') {
+      // AutoUncle shows: "21.422 tilbud" or "269 sider"
+      var match = content.match(/([\d.]+)\s*tilbud/i);
+      if (match) {
+        return parseInt(match[1].replace(/\./g, ''));
+      }
+    }
+    
+    return 0;
+  } catch (e) {
+    return 0;
+  }
+}
+
+/**
+ * Checks if a URL returns content (not empty search results).
+ * Fetches the page and looks for indicators of actual content.
+ * @param {string} url - URL to check
+ * @return {boolean} True if URL has meaningful content
+ */
+function urlHasContent_(url) {
+  try {
+    var response = UrlFetchApp.fetch(url, {
+      method: 'get',
+      muteHttpExceptions: true,
+      followRedirects: true
+    });
+    var code = response.getResponseCode();
+    if (code < 200 || code >= 300) return false;
+    
+    var content = response.getContentText().toLowerCase();
+    
+    // Check for "no results" indicators
+    if (content.indexOf('ingen resultater') > -1 || 
+        content.indexOf('0 resultater') > -1 ||
+        content.indexOf('no results') > -1) {
+      return false;
+    }
+    
+    // Check for positive indicators (car listings)
+    if (content.indexOf('resultater') > -1 || 
+        content.indexOf('biler') > -1 ||
+        content.indexOf('annoncer') > -1) {
+      return true;
+    }
+    
+    return false;
+  } catch (e) {
+    return false;
+  }
+}
+
+/**
+ * Checks if a URL exists by making a HEAD request (faster than GET).
+ * Returns true if status is 200-299.
+ * @param {string} url - URL to check
+ * @return {boolean} True if URL exists
+ */
+function urlExists_(url) {
+  try {
+    var response = UrlFetchApp.fetch(url, {
+      method: 'head',
+      muteHttpExceptions: true,
+      followRedirects: false
+    });
+    var code = response.getResponseCode();
+    return (code >= 200 && code < 300);
+  } catch (e) {
+    return false;
+  }
 }
 
 /**
@@ -1262,13 +1636,12 @@ function generateBriefingGemini_(url, result) {
     'Chat Widget: ' + (result.chatWidget || 'Ingen') + '\n\n' +
     
     '📈 TRACKING & ANALYTICS:\n' +
-    'GA4: ' + (result.ga4 === 'Ja' ? '✅ Ja (' + result.ga4Ids.length + ' property)' : '❌ Nej') + '\n' +
-    'GTM: ' + (result.gtm === 'Ja' ? '✅ Ja (' + result.gtmIds.length + ' container)' : '❌ Nej') + '\n' +
-    'Meta Pixel: ' + (result.metaPixel === 'Ja' ? '✅ Ja (' + result.metaPixelIds.length + ' pixel)' : '❌ Nej') + '\n' +
-    'Google Ads tag: ' + (result.googleAdsTag || 'Ingen') + '\n\n' +
+    'GA4: ' + (result.ga4 || 'Nej') + (result.ga4Ids.length ? ' (ID: ' + result.ga4Ids.join(', ') + ')' : '') + '\n' +
+    'GTM: ' + (result.gtm || 'Nej') + (result.gtmIds.length ? ' (ID: ' + result.gtmIds.join(', ') + ')' : '') + '\n' +
+    'Meta Pixel: ' + (result.metaPixel || 'Nej') + (result.metaPixelIds.length ? ' (ID: ' + result.metaPixelIds.join(', ') + ')' : '') + '\n' +
+    'Google Ads: ' + (result.googleAdsTag || 'Nej') + (result.googleAdsAWIds.length ? ' (' + result.googleAdsAWIds.length + ' AW-IDs)' : '') + '\n\n' +
     
     '🎯 MARKETING TOOLS:\n' +
-    'Google Ads: ' + (result.googleAdsAWIds.length ? result.googleAdsAWIds.length + ' AW-IDs' : 'Ingen') + '\n' +
     'Email Platform: ' + (result.emailPlatform || 'Ingen detekteret') + '\n' +
     'Kontaktformularer: ' + (result.contactForms || '0') + '\n' +
     'Blog: ' + (result.hasBlog || 'Nej') + '\n\n' +
@@ -1283,48 +1656,69 @@ function generateBriefingGemini_(url, result) {
     'Social Media: ' + (result.socialMedia.length ? result.socialMedia.join(', ') : 'Ingen') + '\n' +
     'Ad Platforms: ' + (result.adPlatforms.length ? result.adPlatforms.join(', ') : 'Ingen') + '\n\n' +
     
-    '🎬 INDHOLD:\n' +
-    'Video Marketing: ' + (result.videoMarketing || 'Ingen') + '\n\n' +
+    '🎬 INDHOLD & BRAND:\n' +
+    'Video Marketing: ' + (result.videoMarketing || 'Ingen') + '\n' +
+    'Bilmærker: ' + (result.carBrands || 'Ikke identificeret') + '\n' +
+    'Trustpilot: ' + (result.trustpilot || 'Ingen rating') + '\n' +
+    'Bil Salgsplatforme: ' + (result.carMarketplaces || 'Ingen') + '\n\n' +
     
     '---\n\n' +
     
-    'OPGAVE: Lav struktureret briefing til disse 6 slides:\n\n' +
+    'OPGAVE: Lav struktureret briefing til disse 6 slides.\n\n' +
     
-    '1. COMPANY OVERVIEW (2-3 linjer):\n' +
-    '   - Kort virksomhedsprofil baseret på data\n' +
-    '   - Platform-setup (WordPress/CarAds/andet)\n' +
-    '   - Finansiel kontekst hvis tilgængelig\n\n' +
+    'VIGTIGT OM TRACKING STATUS:\n' +
+    '- "Sandsynligvis (via GTM)" betyder GTM ER installeret, og GA4 er sandsynligvis også aktiveret via GTM (moderne best practice)\n' +
+    '- "Yes" eller "Ja" betyder verificeret installeret\n' +
+    '- Kun "No" eller "Nej" betyder reelt manglende\n' +
+    '- Vær POSITIV når GTM er til stede - det er tegn på digital modenhed!\n\n' +
     
-    '2. DIGITAL MODNING (3-4 linjer):\n' +
-    '   - Tracking-modenhed (GA4, GTM, Meta Pixel status)\n' +
-    '   - Marketing tools (Email, Ads, Blog)\n' +
-    '   - Mobile & UX (mobile-ready, chat, formularer)\n' +
-    '   - Giv score 1-5 med begrundelse\n\n' +
+    'FORMAT REQUIREMENT: Start hver sektion med det eksakte numbered header, så parseren kan opdele indholdet:\n\n' +
     
-    '3. FINANSIEL VURDERING (2 linjer):\n' +
-    '   - Omsætning/ansatte i kontekst\n' +
-    '   - Hvad betyder det for AutoUncle potentiale?\n\n' +
+    '1. COMPANY OVERVIEW\n' +
+    '• Virksomhedsprofil (navn, CVR hvis relevant)\n' +
+    '• Platform setup (WordPress/CarAds)\n' +
+    '• Finansiel størrelse hvis data\n' +
+    'Hold under 50 ord.\n\n' +
     
-    '4. KONKURRENCELANDSKAB (2 linjer):\n' +
-    '   - Hvem konkurrerer de med?\n' +
-    '   - Social media tilstedeværelse\n\n' +
+    '2. DIGITAL MODNING\n' +
+    '• Tracking status - BRUG FAKTISKE DATA fra ovenstående (GA4/GTM/Meta Pixel status)\n' +
+    '• Marketing tools (Email/Ads/Blog)\n' +
+    '• UX niveau (mobile/chat)\n' +
+    '• Samlet score 1-5 baseret på FAKTISK setup\n' +
+    'Hold under 50 ord.\n\n' +
     
-    '5. SALGSMULIGHEDER (3-4 konkrete punkter):\n' +
-    '   - Identificer gaps i deres setup\n' +
-    '   - Hvad mangler de vs best practice?\n' +
-    '   - Hvordan kan AutoUncle hjælpe?\n\n' +
+    '3. FINANSIEL VURDERING\n' +
+    '• Omsætning og størrelse i kontekst\n' +
+    '• AutoUncle potentiale baseret på størrelse\n' +
+    'Hold under 50 ord.\n\n' +
     
-    '6. KEY QUESTIONS (2-3 spørgsmål):\n' +
-    '   - Strategiske spørgsmål til mødet\n' +
-    '   - Baseret på mangler/muligheder\n\n' +
+    '4. KONKURRENCELANDSKAB\n' +
+    '• Konkurrenter (navne)\n' +
+    '• Social/digital tilstedeværelse\n' +
+    'Hold under 50 ord.\n\n' +
     
-    'FORMAT: Brug emojis, bulletpoints, vær skarp og konkret. Max 300 ord total. Skriv KUN briefingen, ingen introduktion.';
+    '5. SALGSMULIGHEDER\n' +
+    '• Konkrete gaps i deres setup\n' +
+    '• Forbedringer vs best practice\n' +
+    '• AutoUncle værditilbud\n' +
+    'Hold under 50 ord.\n\n' +
+    
+    '6. KEY QUESTIONS\n' +
+    '• Strategiske spørgsmål til mødet baseret på mangler (2-3 spørgsmål)\n' +
+    'Hold under 50 ord.\n\n' +
+    
+    'KRITISKE REGLER:\n' +
+    '- START hver sektion med eksakt "1. COMPANY OVERVIEW", "2. DIGITAL MODNING" osv.\n' +
+    '- BRUG ALDRIG markdown bold/italic (**, *, ###, ```)\n' +
+    '- Start punkter med • ikke med *\n' +
+    '- Max 250 ord total\n' +
+    '- Brug simple bullets, ingen nested lists';
 
   var payload = {
     contents: [{ role: 'user', parts: [{ text: prompt }] }],
     generationConfig: { 
       temperature: 0.7, 
-      maxOutputTokens: 4000  // Increased for comprehensive briefing
+      maxOutputTokens: 3000
     }
   };
 
@@ -1340,6 +1734,7 @@ function generateBriefingGemini_(url, result) {
 
   var code = resp.getResponseCode();
   if (code < 200 || code >= 300) {
+    logError_('AI_API_FAILURE', 'Gemini HTTP ' + code + ': ' + resp.getContentText());
     throw new Error('Gemini HTTP ' + code + ': ' + resp.getContentText());
   }
 
@@ -1349,8 +1744,10 @@ function generateBriefingGemini_(url, result) {
   if (!data.candidates || data.candidates.length === 0) {
     Logger.log('Gemini returned no candidates. Full response: ' + JSON.stringify(data));
     if (data.promptFeedback && data.promptFeedback.blockReason) {
+      logWarning_('AI_BLOCKED', 'Reason: ' + data.promptFeedback.blockReason);
       return 'AI briefing blocked: ' + data.promptFeedback.blockReason;
     }
+    logWarning_('AI_NO_RESPONSE', 'Gemini returned no candidates');
     return 'AI briefing: No response generated.';
   }
   
@@ -1360,6 +1757,7 @@ function generateBriefingGemini_(url, result) {
   if (candidate.finishReason && candidate.finishReason !== 'STOP') {
     Logger.log('Gemini stopped with reason: ' + candidate.finishReason);
     Logger.log('Full candidate: ' + JSON.stringify(candidate));
+    logWarning_('AI_INCOMPLETE', 'Finish reason: ' + candidate.finishReason);
     return 'AI briefing incomplete (reason: ' + candidate.finishReason + ')';
   }
   
@@ -1987,8 +2385,8 @@ function createSalesPitchPresentation() {
     return;
   }
   
-  // Hent data fra rækken - tilpasset til ny kolonnestruktur (33 kolonner A-AG)
-  var data = sh.getRange(row, 1, 1, 33).getValues()[0];
+  // Hent data fra rækken - tilpasset til ny kolonnestruktur (36 kolonner A-AJ)
+  var data = sh.getRange(row, 1, 1, 36).getValues()[0];
   
   var leadData = {
     // GRUNDDATA (A-E: 1-5)
@@ -2031,14 +2429,17 @@ function createSalesPitchPresentation() {
     socialMedia: data[26] || '',
     adPlatforms: data[27] || '',
     
-    // MEDIA & INDHOLD (AC: 29)
+    // MEDIA & INDHOLD (AC-AF: 29-32)
     videoMarketing: data[28] || '',
+    carBrands: data[29] || '',
+    trustpilot: data[30] || '',
+    carMarketplaces: data[31] || '',
     
-    // METADATA (AD-AG: 30-33)
-    pagesScanned: data[29] || '',
-    lastRun: data[30] || '',
-    aiBriefing: data[31] || '',  // Column AE (32) - struktureret AI analyse
-    notes: data[32] || ''
+    // METADATA (AG-AJ: 33-36)
+    pagesScanned: data[32] || '',
+    lastRun: data[33] || '',
+    aiBriefing: data[34] || '',  // Column AI (35) - struktureret AI analyse
+    notes: data[35] || ''
   };
   
   // Opret præsentationen
@@ -2054,6 +2455,11 @@ function createSalesPitchPresentation() {
     
     // Parse AI briefing til strukturerede sektioner
     var aiSections = parseAiBriefing_(leadData.aiBriefing);
+    
+    // Log if parser found sections
+    if (!aiSections.overview && !aiSections.digital) {
+      logWarning_('PARSER_EMPTY', 'AI briefing kunne ikke parses korrekt', row);
+    }
     
     // Slide 1: Forside
     createTitleSlide_(presentation, leadData, aiSections);
@@ -2074,8 +2480,11 @@ function createSalesPitchPresentation() {
       createCompetitiveSlide_(presentation, leadData, aiSections);
     }
     
-    // Slide 6: Muligheder & Next Steps (bruger AI section 5: SALGSMULIGHEDER + 6: KEY QUESTIONS)
+    // Slide 6: Muligheder (bruger AI section 5: SALGSMULIGHEDER)
     createOpportunitiesSlide_(presentation, leadData, aiSections);
+    
+    // Slide 7: Next Steps (bruger AI section 6: KEY QUESTIONS)
+    createNextStepsSlide_(presentation, leadData, aiSections);
     
     // Åbn præsentationen
     var url = 'https://docs.google.com/presentation/d/' + presentationId + '/edit';
@@ -2084,6 +2493,8 @@ function createSalesPitchPresentation() {
     var currentNotes = sh.getRange(row, 33).getValue();
     var newNotes = currentNotes ? currentNotes + '\n[Pitch: ' + url + ']' : '[Pitch: ' + url + ']';
     sh.getRange(row, 33).setValue(newNotes);
+    
+    logSuccess_('PRESENTATION_CREATED', 'Pitch for ' + leadData.domain + ': ' + url, row);
     
     // Vis HTML dialog med klikbart link
     var html = HtmlService.createHtmlOutput(
@@ -2096,6 +2507,7 @@ function createSalesPitchPresentation() {
     SpreadsheetApp.getUi().showModalDialog(html, 'Sales Pitch oprettet');
     
   } catch (e) {
+    logError_('PRESENTATION_FAILED', e.toString(), row);
     SpreadsheetApp.getUi().alert('❌ Fejl ved oprettelse af præsentation:\n\n' + e.toString());
     Logger.log('Presentation error: ' + e.toString());
   }
@@ -2210,12 +2622,76 @@ function styleText_(textRange, options) {
  */
 function setSlideBackground_(slide, color) {
   var background = slide.getBackground();
-  var solidFill = background.getSolidFill();
-  if (!solidFill) {
-    solidFill = background.setSolidFill(color);
-  } else {
-    solidFill.setColor(color);
+  background.setSolidFill(color);
+}
+
+/**
+ * Clean markdown formatting from AI text for slide display
+ */
+function cleanMarkdown_(text) {
+  if (!text) return '';
+  
+  var cleaned = text.toString();
+  
+  // Remove markdown headers (### Header -> Header)
+  cleaned = cleaned.replace(/^#{1,6}\s+/gm, '');
+  
+  // Remove bold/italic (**text** -> text, *text* -> text)
+  cleaned = cleaned.replace(/\*\*([^*]+)\*\*/g, '$1');
+  cleaned = cleaned.replace(/\*([^*]+)\*/g, '$1');
+  
+  // Remove code blocks and inline code
+  cleaned = cleaned.replace(/```[^`]*```/g, '');
+  cleaned = cleaned.replace(/`([^`]+)`/g, '$1');
+  
+  // Convert markdown bullets to simple bullets
+  // Handle both * and - at start of lines, with any amount of whitespace
+  cleaned = cleaned.replace(/^\s*[\*\-]\s+/gm, '\u2022 ');
+  
+  // Remove links but keep text [text](url) -> text
+  cleaned = cleaned.replace(/\[([^\]]+)\]\([^)]+\)/g, '$1');
+  
+  // Remove horizontal rules
+  cleaned = cleaned.replace(/^[-*_]{3,}$/gm, '');
+  
+  // Clean up multiple spaces
+  cleaned = cleaned.replace(/  +/g, ' ');
+  
+  // Remove extra blank lines (more than 2 newlines -> 2 newlines)
+  cleaned = cleaned.replace(/\n{3,}/g, '\n\n');
+  
+  // Trim whitespace
+  cleaned = cleaned.trim();
+  
+  return cleaned;
+}
+
+/**
+ * Split long text into chunks that fit on slides (max ~400 chars per slide)
+ */
+function splitTextForSlides_(text, maxLength) {
+  if (!text || text.length <= maxLength) return [text];
+  
+  var chunks = [];
+  var paragraphs = text.split('\n\n');
+  var currentChunk = '';
+  
+  for (var i = 0; i < paragraphs.length; i++) {
+    var para = paragraphs[i];
+    
+    if ((currentChunk + '\n\n' + para).length > maxLength && currentChunk) {
+      chunks.push(currentChunk.trim());
+      currentChunk = para;
+    } else {
+      currentChunk += (currentChunk ? '\n\n' : '') + para;
+    }
   }
+  
+  if (currentChunk) {
+    chunks.push(currentChunk.trim());
+  }
+  
+  return chunks;
 }
 
 /**
@@ -2263,218 +2739,1391 @@ function createTitleSlide_(presentation, data, aiSections) {
 }
 
 /**
- * Virksomhedsinfo slide - AI analysis focused, minimal raw data redundancy
+ * Virksomhedsinfo slides - Multiple slides if content is long
  */
 function createCompanyInfoSlide_(presentation, data, aiSections) {
-  var slide = presentation.appendSlide(SlidesApp.PredefinedLayout.BLANK);
-  setSlideBackground_(slide, '#FFFFFF');
+  var content = '';
   
-  // Title
-  var titleBox = slide.insertTextBox('Virksomhedsprofil', 40, 30, 620, 50);
-  styleText_(titleBox.getText(), {
-    color: SLIDE_THEME.colors.primary,
-    fontSize: SLIDE_THEME.sizes.titleMedium,
-    fontFamily: SLIDE_THEME.fonts.title,
-    bold: true
-  });
-  
-  // AI Analysis (main content - no redundancy)
   if (aiSections.overview) {
-    var analysisBox = slide.insertTextBox(aiSections.overview, 40, 100, 620, 300);
-    var analysisText = analysisBox.getText();
-    styleText_(analysisText, {
-      color: SLIDE_THEME.colors.dark,
-      fontSize: SLIDE_THEME.sizes.bodyLarge,
-      fontFamily: SLIDE_THEME.fonts.body
-    });
-    analysisText.getParagraphStyle().setLineSpacing(120);
+    content = cleanMarkdown_(aiSections.overview);
+  } else {
+    // Fallback if no AI
+    content = data.domain + '\n\n';
+    if (data.cvr) content += 'CVR: ' + data.cvr + '\n';
+    if (data.websitePlatform) content += 'Platform: ' + data.websitePlatform + '\n';
+    if (data.carDealerPlatform) content += 'Bilforhandler platform: ' + data.carDealerPlatform + '\n';
   }
   
-  // Contact footer (compact, only essentials not already in AI)
-  var contactInfo = [];
-  if (data.phone) contactInfo.push('📞 ' + data.phone);
-  if (data.email) contactInfo.push('✉️ ' + data.email);
+  if (!content) return;
   
-  if (contactInfo.length > 0) {
-    var contactBox = slide.insertTextBox(contactInfo.join('  •  '), 40, 450, 620, 40);
-    styleText_(contactBox.getText(), {
-      color: SLIDE_THEME.colors.light,
-      fontSize: SLIDE_THEME.sizes.bodySmall,
+  var chunks = splitTextForSlides_(content, 350);
+  
+  for (var i = 0; i < chunks.length; i++) {
+    var slide = presentation.appendSlide(SlidesApp.PredefinedLayout.BLANK);
+    setSlideBackground_(slide, '#FFFFFF');
+    
+    // Title
+    var titleText = 'Virksomhedsprofil' + (chunks.length > 1 ? ' (' + (i + 1) + '/' + chunks.length + ')' : '');
+    var titleBox = slide.insertTextBox(titleText, 50, 40, 600, 60);
+    styleText_(titleBox.getText(), {
+      color: SLIDE_THEME.colors.primary,
+      fontSize: 22,
+      fontFamily: SLIDE_THEME.fonts.title,
+      bold: true
+    });
+    
+    // Content
+    var contentBox = slide.insertTextBox(chunks[i], 50, 120, 600, 360);
+    var contentText = contentBox.getText();
+    styleText_(contentText, {
+      color: SLIDE_THEME.colors.dark,
+      fontSize: 16,
       fontFamily: SLIDE_THEME.fonts.body
     });
+    contentText.getParagraphStyle().setLineSpacing(150);
   }
 }
 
 /**
- * Digital modenhed slide - AI primary, visual status bar (no redundant lists)
+ * Digital modenhed slides - Multiple slides for tracking vs marketing tools
  */
 function createDigitalMaturitySlide_(presentation, data, aiSections) {
-  var slide = presentation.appendSlide(SlidesApp.PredefinedLayout.BLANK);
-  setSlideBackground_(slide, '#FFFFFF');
+  var content = '';
   
-  // Title
-  var titleBox = slide.insertTextBox('Digital Modenhed', 40, 30, 620, 50);
-  styleText_(titleBox.getText(), {
-    color: SLIDE_THEME.colors.primary,
-    fontSize: SLIDE_THEME.sizes.titleMedium,
-    fontFamily: SLIDE_THEME.fonts.title,
-    bold: true
-  });
-  
-  // AI Analysis (main content)
   if (aiSections.digital) {
-    var analysisBox = slide.insertTextBox(aiSections.digital, 40, 100, 620, 280);
-    styleText_(analysisBox.getText(), {
-      color: SLIDE_THEME.colors.dark,
-      fontSize: SLIDE_THEME.sizes.bodyLarge,
-      fontFamily: SLIDE_THEME.fonts.body
-    });
+    content = cleanMarkdown_(aiSections.digital);
+  } else {
+    // Fallback
+    content = 'Digital Tracking:\n';
+    content += (data.ga4 === 'Ja' ? '\u2022 GA4 aktiveret\n' : '\u2022 Mangler GA4\n');
+    content += (data.gtm === 'Ja' ? '\u2022 GTM aktiveret\n' : '\u2022 Mangler GTM\n');
+    content += (data.metaPixel === 'Ja' ? '\u2022 Meta Pixel aktiveret' : '\u2022 Mangler Meta Pixel');
   }
   
-  // Visual status indicators (compact, non-redundant)
-  var statusY = 420;
-  var statusItems = [
-    { label: 'GA4', value: data.ga4 === 'Ja' },
-    { label: 'GTM', value: data.gtm === 'Ja' },
-    { label: 'Meta', value: data.metaPixel === 'Ja' },
-    { label: 'Mobile', value: data.mobileReady === 'Ja' || data.mobileReady === 'Sandsynligvis' },
-    { label: 'Chat', value: !!data.chatWidget },
-    { label: 'Blog', value: data.hasBlog === 'Ja' }
-  ];
+  if (!content) return;
   
-  var statusText = statusItems.map(function(item) {
-    return (item.value ? '🟢' : '⚫') + ' ' + item.label;
-  }).join('  ');
+  var chunks = splitTextForSlides_(content, 300);
   
-  var statusBox = slide.insertTextBox(statusText, 40, statusY, 620, 30);
-  styleText_(statusBox.getText(), {
-    color: SLIDE_THEME.colors.light,
-    fontSize: SLIDE_THEME.sizes.bodySmall,
-    fontFamily: SLIDE_THEME.fonts.mono
-  });
+  for (var i = 0; i < chunks.length; i++) {
+    var slide = presentation.appendSlide(SlidesApp.PredefinedLayout.BLANK);
+    setSlideBackground_(slide, '#FFFFFF');
+    
+    // Title
+    var titleText = 'Digital Modenhed' + (chunks.length > 1 ? ' (' + (i + 1) + '/' + chunks.length + ')' : '');
+    var titleBox = slide.insertTextBox(titleText, 50, 40, 600, 60);
+    styleText_(titleBox.getText(), {
+      color: SLIDE_THEME.colors.primary,
+      fontSize: 22,
+      fontFamily: SLIDE_THEME.fonts.title,
+      bold: true
+    });
+    
+    // Content
+    var contentBox = slide.insertTextBox(chunks[i], 50, 120, 600, 360);
+    var contentText = contentBox.getText();
+    styleText_(contentText, {
+      color: SLIDE_THEME.colors.dark,
+      fontSize: 15,
+      fontFamily: SLIDE_THEME.fonts.body
+    });
+    contentText.getParagraphStyle().setLineSpacing(150);
+  }
 }
 
 /**
  * Økonomisk slide - AI context, minimal raw data redundancy
  */
+/**
+ * Økonomisk slide - Clean markdown formatting
+ */
 function createFinancialSlide_(presentation, data, aiSections) {
-  var slide = presentation.appendSlide(SlidesApp.PredefinedLayout.BLANK);
-  setSlideBackground_(slide, '#FFFFFF');
+  var content = '';
   
-  // Title
-  var titleBox = slide.insertTextBox('Økonomisk Kontekst', 40, 30, 620, 50);
-  styleText_(titleBox.getText(), {
-    color: SLIDE_THEME.colors.primary,
-    fontSize: SLIDE_THEME.sizes.titleMedium,
-    fontFamily: SLIDE_THEME.fonts.title,
-    bold: true
-  });
-  
-  // AI Analysis (main content - contains numbers in context)
   if (aiSections.financial) {
-    var analysisBox = slide.insertTextBox(aiSections.financial, 40, 100, 620, 300);
-    styleText_(analysisBox.getText(), {
-      color: SLIDE_THEME.colors.dark,
-      fontSize: SLIDE_THEME.sizes.bodyLarge,
-      fontFamily: SLIDE_THEME.fonts.body
-    });
+    content = cleanMarkdown_(aiSections.financial);
+  } else if (data.proffRevenue || data.proffProfit || data.proffEmployees) {
+    // Fallback with raw data
+    content = 'Økonomiske nøgletal:\n\n';
+    if (data.proffRevenue) content += '\u2022 Omsætning: ' + data.proffRevenue + '\n';
+    if (data.proffProfit) content += '\u2022 Resultat: ' + data.proffProfit + '\n';
+    if (data.proffEmployees) content += '\u2022 Ansatte: ' + data.proffEmployees;
   }
   
-  // Only show source reference (data already in AI analysis)
-  if (data.proffRevenue || data.proffProfit || data.proffEmployees) {
-    var sourceBox = slide.insertTextBox('Kilde: Proff.dk', 40, 460, 620, 20);
-    styleText_(sourceBox.getText(), {
-      color: SLIDE_THEME.colors.light,
-      fontSize: SLIDE_THEME.sizes.bodySmall,
-      fontFamily: SLIDE_THEME.fonts.body,
-      italic: true
+  if (!content) return;
+  
+  var chunks = splitTextForSlides_(content, 350);
+  
+  for (var i = 0; i < chunks.length; i++) {
+    var slide = presentation.appendSlide(SlidesApp.PredefinedLayout.BLANK);
+    setSlideBackground_(slide, '#FFFFFF');
+    
+    // Title
+    var titleText = 'Økonomisk Kontekst' + (chunks.length > 1 ? ' (' + (i + 1) + '/' + chunks.length + ')' : '');
+    var titleBox = slide.insertTextBox(titleText, 50, 40, 600, 60);
+    styleText_(titleBox.getText(), {
+      color: SLIDE_THEME.colors.primary,
+      fontSize: 22,
+      fontFamily: SLIDE_THEME.fonts.title,
+      bold: true
     });
+    
+    // Content
+    var contentBox = slide.insertTextBox(chunks[i], 50, 120, 600, 360);
+    var contentText = contentBox.getText();
+    styleText_(contentText, {
+      color: SLIDE_THEME.colors.dark,
+      fontSize: 16,
+      fontFamily: SLIDE_THEME.fonts.body
+    });
+    contentText.getParagraphStyle().setLineSpacing(150);
   }
 }
 
 /**
- * Konkurrencelandskab slide - AI analysis only (already contains competitor names)
+ * Konkurrencelandskab slide - Clean formatting
  */
 function createCompetitiveSlide_(presentation, data, aiSections) {
-  var slide = presentation.appendSlide(SlidesApp.PredefinedLayout.BLANK);
-  setSlideBackground_(slide, '#FFFFFF');
+  var content = '';
   
-  // Title
-  var titleBox = slide.insertTextBox('Konkurrencelandskab', 40, 30, 620, 50);
-  styleText_(titleBox.getText(), {
-    color: SLIDE_THEME.colors.primary,
-    fontSize: SLIDE_THEME.sizes.titleMedium,
-    fontFamily: SLIDE_THEME.fonts.title,
-    bold: true
-  });
-  
-  // AI Analysis (contains competitor context - no need for raw lists)
   if (aiSections.competitive) {
-    var analysisBox = slide.insertTextBox(aiSections.competitive, 40, 100, 620, 350);
-    styleText_(analysisBox.getText(), {
+    content = cleanMarkdown_(aiSections.competitive);
+  } else if (data.competitors || data.socialMedia) {
+    // Fallback
+    if (data.competitors) content += 'Konkurrenter: ' + data.competitors + '\n\n';
+    if (data.socialMedia) content += 'Social Media: ' + data.socialMedia;
+  }
+  
+  if (!content) return;
+  
+  var chunks = splitTextForSlides_(content, 350);
+  
+  for (var i = 0; i < chunks.length; i++) {
+    var slide = presentation.appendSlide(SlidesApp.PredefinedLayout.BLANK);
+    setSlideBackground_(slide, '#FFFFFF');
+    
+    // Title
+    var titleText = 'Konkurrencelandskab' + (chunks.length > 1 ? ' (' + (i + 1) + '/' + chunks.length + ')' : '');
+    var titleBox = slide.insertTextBox(titleText, 50, 40, 600, 60);
+    styleText_(titleBox.getText(), {
+      color: SLIDE_THEME.colors.primary,
+      fontSize: 22,
+      fontFamily: SLIDE_THEME.fonts.title,
+      bold: true
+    });
+    
+    // Content
+    var contentBox = slide.insertTextBox(chunks[i], 50, 120, 600, 360);
+    var contentText = contentBox.getText();
+    styleText_(contentText, {
       color: SLIDE_THEME.colors.dark,
-      fontSize: SLIDE_THEME.sizes.bodyLarge,
+      fontSize: 15,
       fontFamily: SLIDE_THEME.fonts.body
     });
-  } else {
-    // Fallback only if no AI
-    var fallback = 'Konkurrenter: ' + (data.competitors || 'Ingen fundet') + '\n\n';
-    fallback += 'Social Media: ' + (data.socialMedia || 'Ingen kanaler');
-    var fallbackBox = slide.insertTextBox(fallback, 40, 100, 620, 350);
-    styleText_(fallbackBox.getText(), {
-      color: SLIDE_THEME.colors.light,
-      fontSize: SLIDE_THEME.sizes.bodyMedium,
-      fontFamily: SLIDE_THEME.fonts.body
-    });
+    contentText.getParagraphStyle().setLineSpacing(150);
   }
 }
 
 /**
- * Muligheder slide - Action-focused AI insights, styled for impact
+ * Muligheder slide - Clean formatting, auto-split
  */
 function createOpportunitiesSlide_(presentation, data, aiSections) {
+  var content = '';
+  
+  if (aiSections.opportunities) {
+    content = cleanMarkdown_(aiSections.opportunities);
+  } else {
+    // Fallback
+    content = 'Anbefalinger:\n\n';
+    if (data.ga4 !== 'Ja') content += '\u2022 Implementer Google Analytics 4\n';
+    if (data.gtm !== 'Ja') content += '\u2022 Opsæt Google Tag Manager\n';
+    if (data.metaPixel !== 'Ja') content += '\u2022 Tilføj Meta Pixel tracking';
+  }
+  
+  if (!content) return;
+  
+  var chunks = splitTextForSlides_(content, 350);
+  
+  for (var i = 0; i < chunks.length; i++) {
+    var slide = presentation.appendSlide(SlidesApp.PredefinedLayout.BLANK);
+    setSlideBackground_(slide, '#FFFFFF');
+    
+    // Title
+    var titleText = 'Salgsmuligheder' + (chunks.length > 1 ? ' (' + (i + 1) + '/' + chunks.length + ')' : '');
+    var titleBox = slide.insertTextBox(titleText, 50, 40, 600, 60);
+    styleText_(titleBox.getText(), {
+      color: SLIDE_THEME.colors.secondary,
+      fontSize: 22,
+      fontFamily: SLIDE_THEME.fonts.title,
+      bold: true
+    });
+    
+    // Content
+    var contentBox = slide.insertTextBox(chunks[i], 50, 120, 600, 360);
+    var contentText = contentBox.getText();
+    styleText_(contentText, {
+      color: SLIDE_THEME.colors.dark,
+      fontSize: 15,
+      fontFamily: SLIDE_THEME.fonts.body
+    });
+    contentText.getParagraphStyle().setLineSpacing(150);
+  }
+}
+
+/**
+ * Next steps slide - Questions with clean formatting
+ */
+function createNextStepsSlide_(presentation, data, aiSections) {
+  var content = '';
+  
+  if (aiSections.questions) {
+    content = cleanMarkdown_(aiSections.questions);
+  } else {
+    // Fallback
+    content = 'Spørgsmål til mødet:\n\n';
+    content += '\u2022 Hvad er jeres nuværende udfordringer med bilsalg online?\n';
+    content += '\u2022 Hvordan måler I effekten af jeres digitale marketing?';
+  }
+  
+  if (!content) return;
+  
   var slide = presentation.appendSlide(SlidesApp.PredefinedLayout.BLANK);
   setSlideBackground_(slide, '#FFFFFF');
   
   // Title
-  var titleBox = slide.insertTextBox('Næste Skridt', 40, 30, 620, 50);
+  var titleBox = slide.insertTextBox('Spørgsmål til Mødet', 50, 40, 600, 60);
   styleText_(titleBox.getText(), {
-    color: SLIDE_THEME.colors.secondary,
-    fontSize: SLIDE_THEME.sizes.titleMedium,
+    color: SLIDE_THEME.colors.primary,
+    fontSize: 22,
     fontFamily: SLIDE_THEME.fonts.title,
     bold: true
   });
   
-  var yPos = 100;
+  // Questions
+  var questionsBox = slide.insertTextBox(content, 50, 120, 600, 280);
+  var questionsText = questionsBox.getText();
+  styleText_(questionsText, {
+    color: SLIDE_THEME.colors.dark,
+    fontSize: 15,
+    fontFamily: SLIDE_THEME.fonts.body
+  });
+  questionsText.getParagraphStyle().setLineSpacing(150);
   
-  // Sales Opportunities
-  if (aiSections.opportunities) {
-    var oppBox = slide.insertTextBox(aiSections.opportunities, 40, yPos, 620, 180);
-    styleText_(oppBox.getText(), {
-      color: SLIDE_THEME.colors.dark,
-      fontSize: SLIDE_THEME.sizes.bodyLarge,
-      fontFamily: SLIDE_THEME.fonts.body
-    });
-    yPos += 200;
-  }
-  
-  // Key Questions
-  if (aiSections.questions) {
-    var questionsBox = slide.insertTextBox(aiSections.questions, 40, yPos, 620, 150);
-    styleText_(questionsBox.getText(), {
-      color: SLIDE_THEME.colors.primary,
-      fontSize: SLIDE_THEME.sizes.bodyMedium,
-      fontFamily: SLIDE_THEME.fonts.body
-    });
-  }
-  
-  // Call to action footer
-  var ctaBox = slide.insertTextBox('📞 Lad os tale om hvordan AutoUncle kan hjælpe', 40, 480, 620, 30);
-  styleText_(ctaBox.getText(), {
+  // Call to action
+  var ctaBox = slide.insertTextBox('Lad os diskutere hvordan AutoUncle kan hjælpe', 50, 420, 600, 50);
+  var ctaText = ctaBox.getText();
+  styleText_(ctaText, {
     color: SLIDE_THEME.colors.secondary,
-    fontSize: SLIDE_THEME.sizes.bodyMedium,
+    fontSize: 18,
     fontFamily: SLIDE_THEME.fonts.title,
     bold: true
   });
-  ctaBox.getText().getParagraphStyle().setParagraphAlignment(SlidesApp.ParagraphAlignment.CENTER);
+  ctaText.getParagraphStyle().setParagraphAlignment(SlidesApp.ParagraphAlignment.CENTER);
 }
+
+/**
+ * ===================================
+ * AUTOUNCLE ADMIN INTEGRATION
+ * ===================================
+ */
+
+var AU_BASE = 'https://www.autouncle.dk';
+var AU_LOGIN_PAGE = AU_BASE + '/en/login';
+var AU_LOGIN_POST = AU_BASE + '/en/sessions';
+var AU_USER_AGENT = 'Mozilla/5.0 (compatible; GoogleAppsScript; AU-LeadScanner)';
+var AU_MAX_REDIRECTS = 8;
+
+/**
+ * Store AutoUncle credentials (setup step)
+ */
+function setupAutoUncleSession() {
+  var ui = SpreadsheetApp.getUi();
+  
+  var emailResponse = ui.prompt(
+    'AutoUncle Setup - Email',
+    'Indtast din AutoUncle admin email:',
+    ui.ButtonSet.OK_CANCEL
+  );
+  
+  if (emailResponse.getSelectedButton() !== ui.Button.OK) return;
+  
+  var email = emailResponse.getResponseText().trim();
+  if (!email) {
+    ui.alert('Ingen email indtastet');
+    return;
+  }
+  
+  var passwordResponse = ui.prompt(
+    'AutoUncle Setup - Password',
+    'Indtast dit AutoUncle admin password:',
+    ui.ButtonSet.OK_CANCEL
+  );
+  
+  if (passwordResponse.getSelectedButton() !== ui.Button.OK) return;
+  
+  var password = passwordResponse.getResponseText().trim();
+  if (!password) {
+    ui.alert('Intet password indtastet');
+    return;
+  }
+  
+  // Store securely in script properties
+  PropertiesService.getScriptProperties().setProperties({
+    'AU_EMAIL': email,
+    'AU_PASSWORD': password
+  });
+  
+  // Test the connection
+  ui.alert('Testing login...');
+  
+  if (testAutoUncleConnection_()) {
+    ui.alert('Success! AutoUncle admin adgang verificeret ✓\n\nCredentials gemt sikkert.');
+  } else {
+    ui.alert('Fejl: Kunne ikke logge ind.\n\nTjek:\n- Email og password er korrekte\n- Du har admin adgang');
+  }
+}
+
+/**
+ * Login to AutoUncle and get cookie jar
+ */
+function autoUncleLogin_() {
+  var props = PropertiesService.getScriptProperties();
+  var email = props.getProperty('AU_EMAIL');
+  var password = props.getProperty('AU_PASSWORD');
+  
+  if (!email || !password) {
+    throw new Error('AutoUncle credentials not configured. Run Setup Admin Login first.');
+  }
+  
+  // GET login page to get authenticity token
+  var getLogin = fetchWithJar_({
+    url: AU_LOGIN_PAGE,
+    method: 'get',
+    jar: '',
+    headers: { 'Accept': 'text/html' }
+  });
+  
+  var authToken = extractAuthenticityToken_(getLogin.body);
+  if (!authToken) {
+    throw new Error('No authenticity_token found on login page');
+  }
+  
+  // POST credentials
+  var payload = {
+    authenticity_token: authToken,
+    email: email,
+    password: password,
+    remember_me: '1',
+    commit: 'Sign in'
+  };
+  
+  var postLogin = fetchWithJar_({
+    url: AU_LOGIN_POST,
+    method: 'post',
+    jar: getLogin.jar,
+    headers: {
+      'Accept': 'text/html',
+      'Origin': AU_BASE,
+      'Referer': AU_LOGIN_PAGE
+    },
+    payload: payload
+  });
+  
+  return postLogin.jar;
+}
+
+/**
+ * Fetch with manual redirects and cookie jar management
+ */
+function fetchWithJar_(req) {
+  var jar = req.jar || '';
+  var url = req.url;
+  var method = (req.method || 'get').toLowerCase();
+  var headers = req.headers || {};
+  var payload = req.payload || null;
+  
+  headers['User-Agent'] = AU_USER_AGENT;
+  
+  for (var hop = 0; hop <= AU_MAX_REDIRECTS; hop++) {
+    if (jar) headers['Cookie'] = jar;
+    
+    var options = {
+      method: method,
+      headers: headers,
+      muteHttpExceptions: true,
+      followRedirects: false
+    };
+    
+    if (payload && method === 'post') {
+      options.payload = payload;
+    }
+    
+    var resp = UrlFetchApp.fetch(url, options);
+    var status = resp.getResponseCode();
+    var respHeaders = resp.getAllHeaders() || {};
+    var body = resp.getContentText() || '';
+    
+    // Update cookie jar from Set-Cookie headers
+    var setCookiePairs = extractSetCookiePairs_(respHeaders);
+    if (setCookiePairs) {
+      jar = mergeCookies_(jar, setCookiePairs);
+    }
+    
+    var location = respHeaders['Location'] || respHeaders['location'] || '';
+    
+    // Follow redirects manually
+    if (status >= 300 && status < 400 && location) {
+      url = absolutizeUrl_(location);
+      method = 'get';
+      payload = null;
+      delete headers['Origin'];
+      continue;
+    }
+    
+    return {
+      status: status,
+      headers: respHeaders,
+      body: body,
+      jar: jar,
+      finalUrl: url
+    };
+  }
+  
+  throw new Error('Too many redirects (>' + AU_MAX_REDIRECTS + ')');
+}
+
+/**
+ * Extract authenticity token from HTML
+ */
+function extractAuthenticityToken_(html) {
+  var match = (html || '').match(/name="authenticity_token"\s+value="([^"]+)"/i);
+  return match ? match[1] : '';
+}
+
+/**
+ * Extract Set-Cookie pairs from headers
+ */
+function extractSetCookiePairs_(headers) {
+  var setCookie = headers['Set-Cookie'] || headers['set-cookie'];
+  if (!setCookie) return '';
+  
+  var arr = Array.isArray(setCookie) ? setCookie : [setCookie];
+  var parts = [];
+  
+  for (var i = 0; i < arr.length; i++) {
+    var cookiePair = String(arr[i]).split(';')[0].trim();
+    if (cookiePair) parts.push(cookiePair);
+  }
+  
+  return parts.join('; ');
+}
+
+/**
+ * Merge cookie strings
+ */
+function mergeCookies_(a, b) {
+  var jar = {};
+  
+  function ingest(cookieString) {
+    if (!cookieString) return;
+    var parts = cookieString.split(';');
+    for (var i = 0; i < parts.length; i++) {
+      var part = parts[i].trim();
+      if (!part) continue;
+      var eqIndex = part.indexOf('=');
+      if (eqIndex === -1) continue;
+      var name = part.slice(0, eqIndex).trim();
+      var value = part.slice(eqIndex + 1).trim();
+      jar[name] = value;
+    }
+  }
+  
+  ingest(a);
+  ingest(b);
+  
+  var out = [];
+  for (var key in jar) {
+    out.push(key + '=' + jar[key]);
+  }
+  return out.join('; ');
+}
+
+/**
+ * Make URL absolute
+ */
+function absolutizeUrl_(urlOrPath) {
+  if (!urlOrPath) return '';
+  if (/^https?:\/\//i.test(urlOrPath)) return urlOrPath;
+  if (urlOrPath[0] === '/') return AU_BASE + urlOrPath;
+  return AU_BASE + '/' + urlOrPath;
+}
+
+/**
+ * Test AutoUncle admin connection
+ */
+function testAutoUncleConnection_() {
+  try {
+    var jar = autoUncleLogin_();
+    
+    if (!jar) {
+      Logger.log('No cookie jar after login');
+      return false;
+    }
+    
+    // Fetch admin page
+    var adminPage = fetchWithJar_({
+      url: AU_BASE + '/admin/customers/',
+      method: 'get',
+      jar: jar,
+      headers: { 'Accept': 'text/html' }
+    });
+    
+    var html = adminPage.body || '';
+    
+    // Check if authenticated (page contains admin content)
+    var isAuth = html.indexOf('admin') !== -1 && 
+                 !/<title>\s*Sign in\s*-\s*AutoUncle/i.test(html) &&
+                 !/sessions#new/i.test(html);
+    
+    Logger.log('AutoUncle test - Status: ' + adminPage.status);
+    Logger.log('AutoUncle test - Authenticated: ' + (isAuth ? 'YES' : 'NO'));
+    
+    return isAuth;
+    
+  } catch (e) {
+    Logger.log('AutoUncle connection error: ' + e.message);
+    return false;
+  }
+}
+
+/**
+ * Check if dealer exists in AutoUncle admin (using synced sheet)
+ */
+function checkAutoUncleAdmin_(dealerName, domain) {
+  try {
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var sh = ss.getSheetByName('AutoUncle Customers');
+    
+    // If sheet doesn't exist, prompt to sync
+    if (!sh) {
+      return 'Sync required';
+    }
+    
+    // Get all data from sheet
+    var lastRow = sh.getLastRow();
+    if (lastRow < 2) {
+      return 'No data - sync required';
+    }
+    
+    var data = sh.getRange(2, 1, lastRow - 1, 8).getValues(); // ID, Nickname, State, Segment, Depts, Consultant, Created, Products
+    
+    // Normalize function
+    var normalize = function(str) {
+      return str.toLowerCase()
+        .replace(/[.-]/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+    };
+    
+    // Remove company suffixes
+    var removeCompanySuffix = function(str) {
+      return str.replace(/\s*(aps|a\/s|as|i\/s|is|amba|smba|p\/s|k\/s)\s*$/i, '').trim();
+    };
+    
+    // Generate search terms
+    var searchTerms = [
+      dealerName.toLowerCase(),
+      normalize(dealerName),
+      removeCompanySuffix(dealerName.toLowerCase()),
+      normalize(removeCompanySuffix(dealerName)),
+      domain.toLowerCase().replace(/\.(dk|com|no|se)$/, ''),
+      normalize(domain.replace(/\.(dk|com|no|se)$/, ''))
+    ];
+    
+    // Remove duplicates
+    var uniqueTerms = [];
+    for (var i = 0; i < searchTerms.length; i++) {
+      var term = searchTerms[i].trim();
+      if (term && uniqueTerms.indexOf(term) === -1 && term.length > 2) {
+        uniqueTerms.push(term);
+      }
+    }
+    
+    // Search through customers
+    for (var i = 0; i < data.length; i++) {
+      var row = data[i];
+      var customerId = row[0];
+      var nickname = String(row[1] || '');
+      var state = String(row[2] || '');
+      
+      if (!nickname) continue;
+      
+      var nicknameLower = nickname.toLowerCase();
+      var nicknameNorm = normalize(nickname);
+      var nicknameNoSpaces = nicknameLower.replace(/\s+/g, '');
+      var nicknameWords = nicknameLower.split(/[\s.-]+/).filter(function(w) { return w.length > 2; });
+      
+      // Try matching
+      for (var j = 0; j < uniqueTerms.length; j++) {
+        var searchTerm = uniqueTerms[j];
+        var searchTermNorm = normalize(searchTerm);
+        var searchTermNoSpaces = searchTerm.replace(/\s+/g, '');
+        var searchWords = searchTerm.split(/[\s.-]+/).filter(function(w) { return w.length > 2; });
+        
+        var matched = false;
+        
+        // Method 1: Direct substring match
+        if (nicknameLower.indexOf(searchTerm) !== -1 || searchTerm.indexOf(nicknameLower) !== -1) {
+          matched = true;
+        }
+        
+        // Method 2: Match without spaces (lindholmbiler vs lindholm biler)
+        if (!matched && (nicknameNoSpaces.indexOf(searchTermNoSpaces) !== -1 || 
+                         searchTermNoSpaces.indexOf(nicknameNoSpaces) !== -1)) {
+          matched = true;
+        }
+        
+        // Method 3: Word-based matching (at least 2 words match)
+        if (!matched && searchWords.length >= 2 && nicknameWords.length >= 2) {
+          var matchCount = 0;
+          for (var sw = 0; sw < searchWords.length; sw++) {
+            for (var nw = 0; nw < nicknameWords.length; nw++) {
+              if (searchWords[sw] === nicknameWords[nw] || 
+                  searchWords[sw].indexOf(nicknameWords[nw]) !== -1 ||
+                  nicknameWords[nw].indexOf(searchWords[sw]) !== -1) {
+                matchCount++;
+                break;
+              }
+            }
+          }
+          if (matchCount >= 2) matched = true;
+        }
+        
+        // Method 4: Single significant word match (for short names)
+        if (!matched && searchWords.length === 1 && nicknameWords.length >= 1) {
+          for (var nw = 0; nw < nicknameWords.length; nw++) {
+            if (searchWords[0] === nicknameWords[nw] || 
+                (searchWords[0].length > 4 && nicknameWords[nw].indexOf(searchWords[0]) !== -1) ||
+                (nicknameWords[nw].length > 4 && searchWords[0].indexOf(nicknameWords[nw]) !== -1)) {
+              matched = true;
+              break;
+            }
+          }
+        }
+        
+        if (matched) {
+          // Found a match!
+          var link = AU_BASE + '/admin/customers/' + customerId;
+          var info = state || 'Active';
+          return '✓ ' + info + ': ' + link;
+        }
+      }
+    }
+    
+    return 'Not found';
+    
+  } catch (e) {
+    logError_('AUTOUNCLE_ADMIN', e.message, dealerName);
+    return 'Error: ' + e.message;
+  }
+}
+
+/**
+ * Strip HTML tags from text
+ */
+function stripHtml_(html) {
+  if (!html) return '';
+  return String(html)
+    .replace(/<[^>]*>/g, '')
+    .replace(/&nbsp;/g, ' ')
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+/**
+ * Test connection from menu
+ */
+function testAutoUncleConnectionMenu() {
+  var ui = SpreadsheetApp.getUi();
+  
+  if (testAutoUncleConnection_()) {
+    ui.alert('Success! AutoUncle admin adgang fungerer ✓');
+  } else {
+    ui.alert('Fejl: Kunne ikke connecte til AutoUncle admin.\n\nKør "Setup Admin Login" først.');
+  }
+}
+
+/**
+ * Sync AutoUncle customers to a separate sheet
+ */
+function syncAutoUncleCustomers() {
+  var ui = SpreadsheetApp.getUi();
+  
+  try {
+    var jar = autoUncleLogin_();
+    if (!jar) {
+      ui.alert('Fejl: Kunne ikke logge ind i AutoUncle admin.\n\nKør "Setup Admin Login" først.');
+      return;
+    }
+    
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var sheetName = 'AutoUncle Customers';
+    var sh = ss.getSheetByName(sheetName);
+    
+    // Create sheet if doesn't exist
+    if (!sh) {
+      sh = ss.insertSheet(sheetName);
+    }
+    
+    // Clear existing data
+    sh.clear();
+    
+    // Set headers
+    var headers = ['ID', 'Nickname', 'State', 'Segment', 'Nr. Departments', 'Digital Consultant', 'Created', 'Enabled Products', 'Last Synced'];
+    sh.getRange(1, 1, 1, headers.length).setValues([headers]);
+    sh.setFrozenRows(1);
+    
+    // Fetch all pages of customers
+    var allCustomers = [];
+    var page = 1;
+    var maxPages = 50; // Safety limit
+    
+    ui.alert('Syncing AutoUncle customers...\n\nDette kan tage et øjeblik.');
+    
+    while (page <= maxPages) {
+      var url = AU_BASE + '/admin/customers?page=' + page;
+      
+      var response = fetchWithJar_({
+        url: url,
+        method: 'get',
+        jar: jar,
+        headers: { 'Accept': 'text/html' }
+      });
+      
+      if (response.status !== 200) {
+        break;
+      }
+      
+      var html = response.body || '';
+      var customers = parseAutoUncleCustomersPage_(html);
+      
+      if (customers.length === 0) {
+        break; // No more customers
+      }
+      
+      allCustomers = allCustomers.concat(customers);
+      page++;
+      
+      // Rate limiting
+      Utilities.sleep(300);
+    }
+    
+    // Deduplicate by customer ID
+    var uniqueCustomers = [];
+    var seenIds = {};
+    
+    for (var i = 0; i < allCustomers.length; i++) {
+      var c = allCustomers[i];
+      if (!seenIds[c.id]) {
+        seenIds[c.id] = true;
+        uniqueCustomers.push(c);
+      }
+    }
+    
+    // Write to sheet
+    if (uniqueCustomers.length > 0) {
+      var data = [];
+      var timestamp = new Date().toISOString();
+      
+      for (var i = 0; i < uniqueCustomers.length; i++) {
+        var c = uniqueCustomers[i];
+        data.push([
+          c.id,
+          c.nickname,
+          c.state,
+          c.segment,
+          c.departments,
+          c.consultant,
+          c.created,
+          c.products,
+          timestamp
+        ]);
+      }
+      
+      sh.getRange(2, 1, data.length, headers.length).setValues(data);
+      
+      // Auto-resize columns
+      for (var col = 1; col <= headers.length; col++) {
+        sh.autoResizeColumn(col);
+      }
+      
+      ui.alert('Success!\n\nSyncet ' + uniqueCustomers.length + ' kunder fra AutoUncle admin.');
+    } else {
+      ui.alert('Ingen kunder fundet.\n\nTjek din AutoUncle login.');
+    }
+    
+  } catch (e) {
+    logError_('AUTOUNCLE_SYNC', e.message, '');
+    ui.alert('Fejl ved sync:\n\n' + e.message);
+  }
+}
+
+/**
+ * Parse customers from a single page of AutoUncle admin
+ */
+function parseAutoUncleCustomersPage_(html) {
+  var customers = [];
+  
+  if (!html) return customers;
+  
+  // Extract tbody
+  var tbody = (html.match(/<tbody[^>]*>([\s\S]*?)<\/tbody>/i) || ['', ''])[1];
+  if (!tbody) return customers;
+  
+  // Extract all <tr> rows
+  var rows = [];
+  var trRegex = /<tr\b[\s\S]*?<\/tr>/gi;
+  var match;
+  while ((match = trRegex.exec(tbody)) !== null) {
+    rows.push(match[0]);
+  }
+  
+  for (var i = 0; i < rows.length; i++) {
+    var row = rows[i];
+    
+    // Extract customer ID
+    var idMatch = row.match(/\/admin\/customers\/(\d+)/);
+    if (!idMatch) continue;
+    
+    var customerId = idMatch[1];
+    
+    // Extract nickname
+    var nicknameMatch = row.match(/<a[^>]+href="\/admin\/customers\/\d+"[^>]*>([\s\S]*?)<\/a>/i);
+    var nickname = nicknameMatch ? stripHtml_(nicknameMatch[1]) : '';
+    
+    // Extract segment (label after nickname)
+    var segmentMatch = row.match(/<span[^>]+class="label"[^>]*>(A-segment|B-segment|C-segment|D-segment|Oem|Market place|Other)<\/span>/i);
+    var segment = segmentMatch ? segmentMatch[1] : '';
+    
+    // Extract state
+    var stateMatch = row.match(/<span[^>]+class="label"[^>]*>(Paying customer|Trial|Past customer|Unconfigured|Lead)<\/span>/i);
+    var state = stateMatch ? stateMatch[1] : '';
+    
+    // Extract number of departments
+    var deptsMatch = row.match(/<td[^>]*>\s*<strong>(\d+)<\/strong>\s*<\/td>/);
+    var departments = deptsMatch ? deptsMatch[1] : '0';
+    
+    // Extract digital consultant
+    var consultantMatch = row.match(/<td[^>]*>\s*(Niels Hjulmann|Sebastian|Helle|Cristian|Katarina|Johan Frederik|[^<]+?)\s*<\/td>/);
+    var consultant = consultantMatch ? stripHtml_(consultantMatch[1]) : '';
+    
+    // Extract created date
+    var createdMatch = row.match(/<td[^>]*>\s*(over \d+ years? ago|about \d+ years? ago|almost \d+ years? ago|\d+ (months?|days?) ago|over \d+ months? ago|about \d+ months? ago)\s*<\/td>/i);
+    var created = createdMatch ? createdMatch[1] : '';
+    
+    // Extract enabled products - improved extraction
+    var products = '';
+    
+    // Find the <td> that contains products (all the label spans)
+    var tdMatches = row.match(/<td[^>]*>([\s\S]*?)<\/td>/gi);
+    var maxLabels = 0;
+    var bestProductsTd = '';
+    
+    // Find the <td> with the most labels (that's the products column)
+    if (tdMatches) {
+      for (var t = 0; t < tdMatches.length; t++) {
+        var tdContent = tdMatches[t];
+        var labelCount = (tdContent.match(/<span[^>]+class="label"/gi) || []).length;
+        if (labelCount > maxLabels) {
+          maxLabels = labelCount;
+          bestProductsTd = tdContent;
+        }
+      }
+    }
+    
+    // Extract all product labels from that <td>
+    if (bestProductsTd) {
+      var labelMatches = bestProductsTd.match(/<span[^>]+class="label"[^>]*>([^<]+)<\/span>/gi);
+      if (labelMatches && labelMatches.length > 0) {
+        var prods = [];
+        for (var j = 0; j < labelMatches.length; j++) {
+          var p = stripHtml_(labelMatches[j]).trim();
+          // Filter out state labels (we already have state)
+          if (p && p !== state && p !== segment) {
+            prods.push(p);
+          }
+        }
+        products = prods.join(', ');
+      }
+    }
+    
+    customers.push({
+      id: customerId,
+      nickname: nickname,
+      state: state,
+      segment: segment,
+      departments: departments,
+      consultant: consultant,
+      created: created,
+      products: products
+    });
+  }
+  
+  return customers;
+}
+
+/*******************************
+ * BILINFO API INTEGRATION
+ * Henter forhandlerdata fra Bilinfo API
+ *******************************/
+
+/**
+ * Setup Bilinfo API credentials
+ */
+function setupBilinfoCredentials() {
+  var ui = SpreadsheetApp.getUi();
+  
+  var userResult = ui.prompt(
+    'Bilinfo API Setup',
+    'Indtast Bilinfo API Username:',
+    ui.ButtonSet.OK_CANCEL
+  );
+  
+  if (userResult.getSelectedButton() !== ui.Button.OK) {
+    ui.alert('Setup annulleret');
+    return;
+  }
+  
+  var username = userResult.getResponseText().trim();
+  
+  var passResult = ui.prompt(
+    'Bilinfo API Setup',
+    'Indtast Bilinfo API Password:',
+    ui.ButtonSet.OK_CANCEL
+  );
+  
+  if (passResult.getSelectedButton() !== ui.Button.OK) {
+    ui.alert('Setup annulleret');
+    return;
+  }
+  
+  var password = passResult.getResponseText().trim();
+  
+  var keyResult = ui.prompt(
+    'Bilinfo API Setup',
+    'Indtast Bilinfo API Subscription Key:',
+    ui.ButtonSet.OK_CANCEL
+  );
+  
+  if (keyResult.getSelectedButton() !== ui.Button.OK) {
+    ui.alert('Setup annulleret');
+    return;
+  }
+  
+  var subscriptionKey = keyResult.getResponseText().trim();
+  
+  if (!username || !password || !subscriptionKey) {
+    ui.alert('Alle felter skal udfyldes!');
+    return;
+  }
+  
+  var props = PropertiesService.getScriptProperties();
+  props.setProperty('BILINFO_USERNAME', username);
+  props.setProperty('BILINFO_PASSWORD', password);
+  props.setProperty('BILINFO_SUBSCRIPTION_KEY', subscriptionKey);
+  
+  ui.alert('✅ Bilinfo API credentials gemt!\n\nDu kan nu synce forhandlerdata.');
+}
+
+/**
+ * Test Bilinfo API connection
+ */
+function testBilinfoConnection() {
+  var ui = SpreadsheetApp.getUi();
+  
+  try {
+    var props = PropertiesService.getScriptProperties();
+    var username = props.getProperty('BILINFO_USERNAME');
+    var password = props.getProperty('BILINFO_PASSWORD');
+    var subscriptionKey = props.getProperty('BILINFO_SUBSCRIPTION_KEY');
+    
+    if (!username || !password || !subscriptionKey) {
+      ui.alert('❌ API credentials ikke sat op.\n\nBrug "Setup API Credentials" først.');
+      return;
+    }
+    
+    // Test API call
+    var url = 'https://publicapi.bilinfo.net/listingapi/api/export?sinceDays=1';
+    var authHeader = 'Basic ' + Utilities.base64Encode(username + ':' + password);
+    
+    var options = {
+      method: 'get',
+      headers: {
+        'Authorization': authHeader,
+        'Ocp-Apim-Subscription-Key': subscriptionKey
+      },
+      muteHttpExceptions: true
+    };
+    
+    var response = UrlFetchApp.fetch(url, options);
+    var responseCode = response.getResponseCode();
+    
+    if (responseCode === 200) {
+      var data = JSON.parse(response.getContentText());
+      ui.alert('✅ API Connection OK!\n\n' +
+               'API Version: ' + data.ApiVersion + '\n' +
+               'Biler hentet (sidste dag): ' + data.VehicleCount);
+    } else {
+      ui.alert('❌ API fejl!\n\nHTTP ' + responseCode + '\n' + response.getContentText());
+    }
+    
+  } catch (e) {
+    ui.alert('❌ Fejl: ' + e.toString());
+  }
+}
+
+/**
+ * Create Bilinfo Data sheet
+ */
+function createBilinfoSheet() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheetName = 'Bilinfo Data';
+  
+  // Check if sheet already exists
+  var existingSheet = ss.getSheetByName(sheetName);
+  if (existingSheet) {
+    var ui = SpreadsheetApp.getUi();
+    var response = ui.alert(
+      'Ark findes allerede',
+      'Arket "' + sheetName + '" findes allerede. Vil du slette og genoprette det?',
+      ui.ButtonSet.YES_NO
+    );
+    
+    if (response === ui.Button.YES) {
+      ss.deleteSheet(existingSheet);
+    } else {
+      return;
+    }
+  }
+  
+  // Create new sheet
+  var sheet = ss.insertSheet(sheetName);
+  
+  // Set headers
+  var headers = [
+    'Domain',
+    'DealerName',
+    'Afdeling',
+    'DealerGuid',
+    'Website',
+    'Antal Biler',
+    'Sidst Opdateret'
+  ];
+  
+  var headerRange = sheet.getRange(1, 1, 1, headers.length);
+  headerRange.setValues([headers]);
+  headerRange.setFontWeight('bold');
+  headerRange.setBackground('#4285F4');
+  headerRange.setFontColor('#FFFFFF');
+  
+  // Set column widths
+  sheet.setColumnWidth(1, 200); // Domain
+  sheet.setColumnWidth(2, 250); // DealerName
+  sheet.setColumnWidth(3, 150); // Afdeling
+  sheet.setColumnWidth(4, 300); // DealerGuid
+  sheet.setColumnWidth(5, 250); // Website
+  sheet.setColumnWidth(6, 120); // Antal Biler
+  sheet.setColumnWidth(7, 180); // Sidst Opdateret
+  
+  // Freeze header row
+  sheet.setFrozenRows(1);
+  
+  SpreadsheetApp.getUi().alert('✅ Arket "' + sheetName + '" er oprettet!\n\nKør nu "Sync Forhandler Data" for at hente data.');
+}
+
+/**
+ * Sync Bilinfo dealer data
+ */
+function syncBilinfoData() {
+  var ui = SpreadsheetApp.getUi();
+  
+  try {
+    // Check credentials
+    var props = PropertiesService.getScriptProperties();
+    var username = props.getProperty('BILINFO_USERNAME');
+    var password = props.getProperty('BILINFO_PASSWORD');
+    var subscriptionKey = props.getProperty('BILINFO_SUBSCRIPTION_KEY');
+    
+    if (!username || !password || !subscriptionKey) {
+      ui.alert('❌ API credentials ikke sat op.\n\nBrug "Setup API Credentials" først.');
+      return;
+    }
+    
+    // Check if sheet exists
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var sheet = ss.getSheetByName('Bilinfo Data');
+    
+    if (!sheet) {
+      ui.alert('❌ Arket "Bilinfo Data" findes ikke.\n\nBrug "Opret Bilinfo Ark" først.');
+      return;
+    }
+    
+    ui.alert('⏳ Henter data fra Bilinfo API...\n\nDette kan tage 10-30 sekunder.');
+    
+    // Fetch data from API
+    var dealers = fetchBilinfoDealers_(username, password, subscriptionKey);
+    
+    if (!dealers || dealers.length === 0) {
+      ui.alert('❌ Ingen forhandlere hentet fra API');
+      return;
+    }
+    
+    // Clear existing data (except header)
+    var lastRow = sheet.getLastRow();
+    if (lastRow > 1) {
+      sheet.getRange(2, 1, lastRow - 1, 7).clear();
+    }
+    
+    // Prepare data for sheet (each department as separate row)
+    var now = new Date();
+    var dataRows = dealers.map(function(dealer) {
+      return [
+        dealer.domain,
+        dealer.dealerName,
+        dealer.department || '', // Afdeling/lokation
+        dealer.dealerGuid,
+        dealer.website,
+        '', // Leave vehicle count empty - will be fetched when running MVP
+        now
+      ];
+    });
+    
+    // Write data to sheet
+    if (dataRows.length > 0) {
+      sheet.getRange(2, 1, dataRows.length, 7).setValues(dataRows);
+      
+      // Format vehicle count as number
+      sheet.getRange(2, 6, dataRows.length, 1).setNumberFormat('#,##0');
+      
+      // Format date
+      sheet.getRange(2, 7, dataRows.length, 1).setNumberFormat('yyyy-mm-dd hh:mm');
+    }
+    
+    // Sort by domain, then dealerName
+    var dataRange = sheet.getRange(2, 1, dataRows.length, 7);
+    dataRange.sort([{column: 1, ascending: true}, {column: 2, ascending: true}]);
+    
+    ui.alert('✅ Sync fuldført!\n\n' +
+             'Afdelinger opdateret: ' + dealers.length + '\n\n' +
+             'Bilantal summeres automatisk når du kører MVP på dine leads.\n' +
+             'GUID\'er er gemt og klar til brug.');
+    
+  } catch (e) {
+    ui.alert('❌ Fejl under sync:\n\n' + e.toString());
+    Logger.log('Bilinfo sync error: ' + e.toString());
+  }
+}
+
+/**
+ * Fetch dealers from Bilinfo API
+ * @private
+ */
+function fetchBilinfoDealers_(username, password, subscriptionKey) {
+  // Use sinceDays=1 to reduce payload size and avoid JSON parsing errors
+  var url = 'https://publicapi.bilinfo.net/listingapi/api/export?sinceDays=1';
+  var authHeader = 'Basic ' + Utilities.base64Encode(username + ':' + password);
+  
+  var options = {
+    method: 'get',
+    headers: {
+      'Authorization': authHeader,
+      'Ocp-Apim-Subscription-Key': subscriptionKey
+    },
+    muteHttpExceptions: true
+  };
+  
+  Logger.log('Fetching Bilinfo data...');
+  var response = UrlFetchApp.fetch(url, options);
+  var responseCode = response.getResponseCode();
+  
+  if (responseCode !== 200) {
+    throw new Error('API returned HTTP ' + responseCode + ': ' + response.getContentText().substring(0, 500));
+  }
+  
+  Logger.log('Response received, parsing JSON...');
+  var responseText = response.getContentText();
+  Logger.log('Response size: ' + responseText.length + ' bytes');
+  
+  var data;
+  try {
+    data = JSON.parse(responseText);
+  } catch (e) {
+    Logger.log('JSON parse error at position: ' + e.message);
+    throw new Error('Failed to parse API response. Response may be too large or contain invalid JSON. Try reducing sinceDays parameter.');
+  }
+  
+  if (!data.Vehicles || data.Vehicles.length === 0) {
+    return [];
+  }
+  
+  // Group by DealerGuid - each department gets its own entry
+  var dealerMap = {};
+  
+  for (var i = 0; i < data.Vehicles.length; i++) {
+    var vehicle = data.Vehicles[i];
+    var guid = vehicle.DealerGuid;
+    
+    if (!guid) continue;
+    
+    if (!dealerMap[guid]) {
+      var domain = '';
+      if (vehicle.DealerWebsite) {
+        try {
+          var websiteUrl = vehicle.DealerWebsite;
+          // Extract domain from URL
+          var matches = websiteUrl.match(/^(?:https?:\/\/)?(?:www\.)?([^\/\?#]+)/i);
+          if (matches && matches[1]) {
+            domain = matches[1].toLowerCase();
+          }
+        } catch (e) {
+          Logger.log('Error parsing website: ' + vehicle.DealerWebsite);
+        }
+      }
+      
+      // Extract department/location from dealer name
+      var department = '';
+      var dealerName = vehicle.DealerName || '';
+      
+      // Try to extract location after " - " or last part
+      var parts = dealerName.split(' - ');
+      if (parts.length > 1) {
+        department = parts[parts.length - 1];
+      }
+      
+      dealerMap[guid] = {
+        dealerName: dealerName,
+        department: department,
+        dealerGuid: guid,
+        website: vehicle.DealerWebsite || '',
+        domain: domain
+      };
+    }
+  }
+  
+  // Convert to array
+  var dealers = [];
+  for (var key in dealerMap) {
+    dealers.push(dealerMap[key]);
+  }
+  
+  return dealers;
+}
+
+/**
+ * Fetch vehicle count for a specific domain from Bilinfo API
+ * Finds ALL departments for the domain and sums vehicle counts
+ * @private
+ */
+function fetchBilinfoCountForDomain_(domain) {
+  if (!domain) return null;
+  
+  try {
+    // Get credentials
+    var props = PropertiesService.getScriptProperties();
+    var username = props.getProperty('BILINFO_USERNAME');
+    var password = props.getProperty('BILINFO_PASSWORD');
+    var subscriptionKey = props.getProperty('BILINFO_SUBSCRIPTION_KEY');
+    
+    if (!username || !password || !subscriptionKey) {
+      Logger.log('Bilinfo credentials not configured - skipping vehicle count');
+      return null;
+    }
+    
+    // Look up ALL DealerGuids for this domain in Bilinfo Data sheet
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var bilinfoSheet = ss.getSheetByName('Bilinfo Data');
+    
+    if (!bilinfoSheet) {
+      Logger.log('Bilinfo Data sheet not found - skipping vehicle count');
+      return null;
+    }
+    
+    // Find all departments for this domain
+    var data = bilinfoSheet.getDataRange().getValues();
+    var dealerGuids = [];
+    
+    for (var i = 1; i < data.length; i++) { // Skip header
+      var sheetDomain = data[i][0]; // Column A: Domain
+      if (sheetDomain && sheetDomain.toLowerCase() === domain.toLowerCase()) {
+        var guid = data[i][3]; // Column D: DealerGuid (after adding Afdeling column)
+        if (guid) {
+          dealerGuids.push({
+            guid: guid,
+            name: data[i][1], // DealerName
+            department: data[i][2] // Afdeling
+          });
+        }
+      }
+    }
+    
+    if (dealerGuids.length === 0) {
+      Logger.log('No DealerGuids found for domain: ' + domain);
+      return null;
+    }
+    
+    Logger.log('Found ' + dealerGuids.length + ' department(s) for ' + domain);
+    
+    // Make API calls for each department and sum vehicle counts
+    var totalCount = 0;
+    var authHeader = 'Basic ' + Utilities.base64Encode(username + ':' + password);
+    
+    var options = {
+      method: 'get',
+      headers: {
+        'Authorization': authHeader,
+        'Ocp-Apim-Subscription-Key': subscriptionKey
+      },
+      muteHttpExceptions: true
+    };
+    
+    for (var j = 0; j < dealerGuids.length; j++) {
+      var dealerInfo = dealerGuids[j];
+      var url = 'https://publicapi.bilinfo.net/listingapi/api/export?dealerId=' + dealerInfo.guid;
+      
+      Logger.log('Fetching count for ' + dealerInfo.name + ' (GUID: ' + dealerInfo.guid + ')');
+      var response = UrlFetchApp.fetch(url, options);
+      
+      if (response.getResponseCode() !== 200) {
+        Logger.log('API error for ' + dealerInfo.name + ': HTTP ' + response.getResponseCode());
+        continue;
+      }
+      
+      var apiData = JSON.parse(response.getContentText());
+      var count = apiData.VehicleCount || 0;
+      totalCount += count;
+      
+      Logger.log(dealerInfo.department + ': ' + count + ' vehicles');
+      
+      // Add small delay to avoid rate limiting
+      if (j < dealerGuids.length - 1) {
+        Utilities.sleep(500);
+      }
+    }
+    
+    Logger.log('Total vehicles for ' + domain + ': ' + totalCount + ' (' + dealerGuids.length + ' departments)');
+    
+    return {
+      totalCount: totalCount,
+      departmentCount: dealerGuids.length,
+      departments: dealerGuids.map(function(d) { return d.department || d.name; })
+    };
+    
+  } catch (e) {
+    Logger.log('Error fetching Bilinfo count for ' + domain + ': ' + e.toString());
+    return null;
+  }
+}
+
+
