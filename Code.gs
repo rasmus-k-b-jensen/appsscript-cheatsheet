@@ -2146,22 +2146,22 @@ function extractFromProffJson_(html, label) {
           Logger.log('Too low for revenue, skipping');
           continue;
         }
-        // Revenue in thousands - multiply by 1000 and format
+        // Revenue in thousands (tkr) - multiply by 1000 and format
         var actualValue = numValue * 1000;
         var formatted = formatDanishNumber_(actualValue);
         Logger.log('Formatted ' + label + ': ' + value + ' tkr -> ' + formatted + ' kr');
-        return formatted;
+        return formatted + ' kr'; // Add ' kr' suffix for clarity
       } else if (label === 'Resultat') {
         // Profit can be negative (loss) - only skip very small positive values
         if (numValue > 0 && absValue < 10) {
           Logger.log('Too low positive value for profit, skipping');
           continue;
         }
-        // Profit in thousands - multiply by 1000 and format (preserves negative)
+        // Profit in thousands (tkr) - multiply by 1000 and format (preserves negative)
         var actualValue = numValue * 1000;
         var formatted = formatDanishNumber_(actualValue);
         Logger.log('Formatted ' + label + ': ' + value + ' tkr -> ' + formatted + ' kr');
-        return formatted;
+        return formatted + ' kr'; // Add ' kr' suffix for clarity
       }
     }
   }
@@ -2258,22 +2258,22 @@ function cleanAndValidateProffNumber_(rawValue, label, searchLabel) {
       Logger.log('Suspiciously low value for ' + label + ': ' + value);
       return '';
     }
-    // Multiply by 1000 and format
+    // Multiply by 1000 and format (Proff shows values in thousands)
     var actualValue = numValue * 1000;
     var formatted = formatDanishNumber_(actualValue);
     Logger.log('Found ' + label + ' from "' + searchLabel + '": ' + value + ' tkr -> ' + formatted + ' kr');
-    return formatted;
+    return formatted + ' kr'; // Add ' kr' suffix for clarity
   } else if (label === 'Resultat') {
     // Profit can be negative (loss) - only skip very small positive values
     if (numValue > 0 && absValue < 10) {
       Logger.log('Suspiciously low positive value for ' + label + ': ' + value);
       return '';
     }
-    // Multiply by 1000 and format (preserves negative sign)
+    // Multiply by 1000 and format (Proff shows values in thousands, preserves negative sign)
     var actualValue = numValue * 1000;
     var formatted = formatDanishNumber_(actualValue);
     Logger.log('Found ' + label + ' from "' + searchLabel + '": ' + value + ' tkr -> ' + formatted + ' kr');
-    return formatted;
+    return formatted + ' kr'; // Add ' kr' suffix for clarity
   }
   
   return value;
