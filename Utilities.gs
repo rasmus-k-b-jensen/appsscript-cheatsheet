@@ -3,6 +3,18 @@
  * Ekstra funktionalitet der kan tilføjes efter behov
  */
 
+// Column constants (shared with Code.gs)
+var COL = {
+  URL: 1, DOMAIN: 2, CVR: 3, PHONE: 4, EMAIL: 5,
+  WEBSITE_PLATFORM: 6, CAR_DEALER_PLATFORM: 7, MOBILE_READY: 8, CMP_COOKIE_VENDOR: 9, CHAT_WIDGET: 10,
+  GA4: 11, GA4_IDS: 12, GTM: 13, GTM_IDS: 14, META_PIXEL: 15, META_PIXEL_IDS: 16, GOOGLE_ADS_TAG: 17,
+  GOOGLE_ADS_AW_IDS: 18, EMAIL_PLATFORM: 19, CONTACT_FORMS: 20, BLOG: 21,
+  PROFF_LINK: 22, REVENUE: 23, PROFIT: 24, EMPLOYEES: 25,
+  COMPETITORS: 26, SOCIAL_MEDIA: 27, AD_PLATFORMS: 28,
+  VIDEO_MARKETING: 29, CAR_BRANDS: 30, TRUSTPILOT: 31, CAR_MARKETPLACES: 32,
+  PAGES_SCANNED: 33, LAST_RUN: 34, AI_BRIEFING: 35, NOTES: 36, AUTOUCLE_ADMIN: 37, BILINFO_ANTAL: 38, BILINFO_AFDELINGER: 39
+};
+
 /**
  * BONUS FUNCTION: Bulk clear all data (bevar headers)
  */
@@ -202,11 +214,11 @@ function analyzeTrackingStats() {
   };
   
   for (var r = 2; r <= lastRow; r++) {
-    var ga4 = sh.getRange(r, 6).getValue() === 'Yes';
-    var gtm = sh.getRange(r, 7).getValue() === 'Yes';
-    var meta = sh.getRange(r, 8).getValue() === 'Yes';
-    var ads = sh.getRange(r, 9).getValue() === 'Yes';
-    var cmp = (sh.getRange(r, 19).getValue() || '').toString().trim() !== '';
+    var ga4 = sh.getRange(r, COL.GA4).getValue() === 'Yes';
+    var gtm = sh.getRange(r, COL.GTM).getValue() === 'Yes';
+    var meta = sh.getRange(r, COL.META_PIXEL).getValue() === 'Yes';
+    var ads = sh.getRange(r, COL.GOOGLE_ADS_TAG).getValue() === 'Yes';
+    var cmp = (sh.getRange(r, COL.EMAIL_PLATFORM).getValue() || '').toString().trim() !== '';
     
     if (ga4) stats.hasGA4++;
     if (gtm) stats.hasGTM++;

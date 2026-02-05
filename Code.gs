@@ -23,6 +23,64 @@ var SHEET_NAME = 'Leads';
 var MAX_PAGES = 5;
 var FETCH_DELAY_MS = 500; // Rate limiting: pause between requests
 
+// Column mappings for Leads sheet - makes code more maintainable
+var COL = {
+  // GRUNDDATA (A-E)
+  URL: 1,
+  DOMAIN: 2,
+  CVR: 3,
+  PHONE: 4,
+  EMAIL: 5,
+  
+  // TEKNOLOGI & PLATFORM (F-J)
+  WEBSITE_PLATFORM: 6,
+  CAR_DEALER_PLATFORM: 7,
+  MOBILE_READY: 8,
+  CMP_COOKIE_VENDOR: 9,
+  CHAT_WIDGET: 10,
+  
+  // TRACKING & ANALYTICS (K-Q)
+  GA4: 11,
+  GA4_IDS: 12,
+  GTM: 13,
+  GTM_IDS: 14,
+  META_PIXEL: 15,
+  META_PIXEL_IDS: 16,
+  GOOGLE_ADS_TAG: 17,
+  
+  // MARKETING TOOLS (R-U)
+  GOOGLE_ADS_AW_IDS: 18,
+  EMAIL_PLATFORM: 19,
+  CONTACT_FORMS: 20,
+  BLOG: 21,
+  
+  // BUSINESS DATA (V-Y)
+  PROFF_LINK: 22,
+  REVENUE: 23,
+  PROFIT: 24,
+  EMPLOYEES: 25,
+  
+  // KONKURRENCE & SOCIAL (Z-AB)
+  COMPETITORS: 26,
+  SOCIAL_MEDIA: 27,
+  AD_PLATFORMS: 28,
+  
+  // MEDIA & INDHOLD (AC-AF)
+  VIDEO_MARKETING: 29,
+  CAR_BRANDS: 30,
+  TRUSTPILOT: 31,
+  CAR_MARKETPLACES: 32,
+  
+  // METADATA (AG-AM)
+  PAGES_SCANNED: 33,
+  LAST_RUN: 34,
+  AI_BRIEFING: 35,
+  NOTES: 36,
+  AUTOUCLE_ADMIN: 37,
+  BILINFO_ANTAL: 38,
+  BILINFO_AFDELINGER: 39
+};
+
 // Exclusions to avoid wasting crawl budget on assets and noise
 var EXCLUDED_EXT_RE = /\.(css|js|png|jpe?g|gif|svg|webp|woff2?|ttf|eot|pdf|xml|json|rss)(\?|$)/i;
 var EXCLUDED_PATH_RE = /(\/wp-content\/|\/wp-includes\/|\/feed\/|\/comments\/|\/tag\/|\/category\/)/i;
@@ -169,7 +227,7 @@ function runMvpForSelection() {
 
     for (var r = startRow; r < startRow + numRows; r++) {
       if (r === 1) continue; // Skip header
-      var url = (sh.getRange(r, 1).getValue() || '').toString().trim();
+      var url = (sh.getRange(r, COL.URL).getValue() || '').toString().trim();
       if (url) {
         runMvpForRow_(sh, r);
         processed++;
@@ -209,7 +267,7 @@ function runMvpForAll() {
     // Count URLs først
     var urlCount = 0;
     for (var r = 2; r <= lastRow; r++) {
-      var url = (sh.getRange(r, 1).getValue() || '').toString().trim();
+      var url = (sh.getRange(r, COL.URL).getValue() || '').toString().trim();
       if (url) urlCount++;
     }
     
@@ -239,7 +297,7 @@ function runMvpForAll() {
     var errors = 0;
     
     for (var r = 2; r <= lastRow; r++) {
-      var url = (sh.getRange(r, 1).getValue() || '').toString().trim();
+      var url = (sh.getRange(r, COL.URL).getValue() || '').toString().trim();
       if (url) {
         try {
           runMvpForRow_(sh, r);
@@ -272,22 +330,22 @@ function runMvpForAll() {
 
 function runMvpForRow_(sh, row) {
   try {
-    var url = (sh.getRange(row, 1).getValue() || '').toString().trim();
+    var url = (sh.getRange(row, COL.URL).getValue() || '').toString().trim();
     if (!url) return;
 
     var normalized = normalizeUrl_(url);
-    sh.getRange(row, 1).setValue(normalized);
+    sh.getRange(row, COL.URL).setValue(normalized);
 
     var domain = extractDomain_(normalized);
-    sh.getRange(row, 2).setValue(domain);
+    sh.getRange(row, COL.DOMAIN).setValue(domain);
 
     var result;
     try {
       result = scanWebsite_(normalized, MAX_PAGES);
     } catch (e) {
       var errorMsg = 'Fetch error: ' + (e && e.message ? e.message : e);
-      sh.getRange(row, 33).setValue(errorMsg); // Notes kolonne (AG)
-      sh.getRange(row, 31).setValue(new Date()); // Last run (AF)
+      sh.getRange(row, COL.NOTES).setValue(errorMsg);
+      sh.getRange(row, COL.LAST_RUN).setValue(new Date());
       Logger.log('Row ' + row + ' scan error: ' + errorMsg);
       return;
     }
@@ -314,7 +372,7 @@ function runMvpForRow_(sh, row) {
     result.phone || '',                         // D: Telefon
     result.email || ''                          // E: Email
   ]];
-  sh.getRange(row, 3, 1, 3).setValues(batchData1);
+  sh.getRange(row, COL.CVR, 1, 3).setValues(batchData1);
   
   // TEKNOLOGI & PLATFORM (F-J: 5 cols)
   var batchData2 = [[
@@ -324,7 +382,7 @@ function runMvpForRow_(sh, row) {
     result.cmpVendors.join(', '),               // I: CMP/Cookie vendor
     result.chatWidget || ''                     // J: Chat Widget
   ]];
-  sh.getRange(row, 6, 1, 5).setValues(batchData2);
+  sh.getRange(row, COL.WEBSITE_PLATFORM, 1, 5).setValues(batchData2);
   
   // TRACKING & ANALYTICS (K-Q: 7 cols)
   var batchData3 = [[
@@ -336,7 +394,7 @@ function runMvpForRow_(sh, row) {
     result.metaPixelIds.join(', '),            // P: Meta Pixel IDs
     result.awIds.length ? 'Yes' : 'No'         // Q: Google Ads tag
   ]];
-  sh.getRange(row, 11, 1, 7).setValues(batchData3);
+  sh.getRange(row, COL.GA4, 1, 7).setValues(batchData3);
   
   // MARKETING TOOLS (R-U: 4 cols)
   var batchData4 = [[
@@ -345,20 +403,20 @@ function runMvpForRow_(sh, row) {
     result.contactForms || '',                  // T: Kontaktformularer
     result.hasBlog || ''                        // U: Blog
   ]];
-  sh.getRange(row, 18, 1, 4).setValues(batchData4);
+  sh.getRange(row, COL.GOOGLE_ADS_AW_IDS, 1, 4).setValues(batchData4);
   
   // BUSINESS DATA - Proff.dk (V-Y: 4 cols)
   var proffData = scrapeProffData_(result.cvr, domain);
-  sh.getRange(row, 22).setValue(proffData.proffUrl);  // V: Proff link
+  sh.getRange(row, COL.PROFF_LINK).setValue(proffData.proffUrl);  // V: Proff link
   
   if (proffData.revenue) {
-    sh.getRange(row, 23).setValue(proffData.revenue).setNumberFormat('@STRING@');  // W: Omsætning
+    sh.getRange(row, COL.REVENUE).setValue(proffData.revenue).setNumberFormat('@STRING@');  // W: Omsætning
   }
   if (proffData.profit) {
-    sh.getRange(row, 24).setValue(proffData.profit).setNumberFormat('@STRING@');   // X: Resultat
+    sh.getRange(row, COL.PROFIT).setValue(proffData.profit).setNumberFormat('@STRING@');   // X: Resultat
   }
   if (proffData.employees) {
-    sh.getRange(row, 25).setValue(proffData.employees);  // Y: Ansatte
+    sh.getRange(row, COL.EMPLOYEES).setValue(proffData.employees);  // Y: Ansatte
   }
   
   // KONKURRENCE & SOCIAL (Z-AB: 3 cols)
@@ -367,7 +425,7 @@ function runMvpForRow_(sh, row) {
     result.socialMedia.join(', '),              // AA: Social Media
     result.adPlatforms.join(', ')               // AB: Ad Platforms
   ]];
-  sh.getRange(row, 26, 1, 3).setValues(batchData5);
+  sh.getRange(row, COL.COMPETITORS, 1, 3).setValues(batchData5);
   
   // MEDIA & INDHOLD (AC-AF: 4 cols)
   var batchData6 = [[
@@ -376,20 +434,20 @@ function runMvpForRow_(sh, row) {
     result.trustpilot || '',                    // AE: Trustpilot Rating
     result.carMarketplaces || ''                // AF: Bil Salgsplatforme
   ]];
-  sh.getRange(row, 29, 1, 4).setValues(batchData6);
+  sh.getRange(row, COL.VIDEO_MARKETING, 1, 4).setValues(batchData6);
   
   // METADATA (AG-AM: 7 cols) - AG (Pages scanned), AH (Last run), skip AI (35) and AJ (36), AK (AutoUncle Admin), AL (Bilinfo Antal), AM (Afdelinger Bilinfo)
-  sh.getRange(row, 33, 1, 1).setValues([[result.pagesScanned.join(' | ')]]);  // AG: Pages scanned
-  sh.getRange(row, 34, 1, 1).setValues([[new Date()]]);                        // AH: Last run
-  sh.getRange(row, 37, 1, 1).setValues([[result.autoUncleStatus || '']]);     // AK: AutoUncle Admin
+  sh.getRange(row, COL.PAGES_SCANNED, 1, 1).setValues([[result.pagesScanned.join(' | ')]]);  // AG: Pages scanned
+  sh.getRange(row, COL.LAST_RUN, 1, 1).setValues([[new Date()]]);                        // AH: Last run
+  sh.getRange(row, COL.AUTOUCLE_ADMIN, 1, 1).setValues([[result.autoUncleStatus || '']]);     // AK: AutoUncle Admin
   
   // AL & AM: Bilinfo Antal + Afdelinger - Fetch from Bilinfo API
   Logger.log('Attempting to fetch Bilinfo data for domain: ' + domain);
   var bilinfoData = fetchBilinfoCountForDomain_(domain);
   Logger.log('Bilinfo data result: ' + JSON.stringify(bilinfoData));
   if (bilinfoData !== null) {
-    sh.getRange(row, 38, 1, 1).setValues([[bilinfoData.totalCount]]);  // AL: Bilinfo Antal
-    sh.getRange(row, 39, 1, 1).setValues([[bilinfoData.departmentCount]]);  // AM: Afdelinger (Bilinfo)
+    sh.getRange(row, COL.BILINFO_ANTAL, 1, 1).setValues([[bilinfoData.totalCount]]);  // AL: Bilinfo Antal
+    sh.getRange(row, COL.BILINFO_AFDELINGER, 1, 1).setValues([[bilinfoData.departmentCount]]);  // AM: Afdelinger (Bilinfo)
     Logger.log('Wrote Bilinfo data - Biler: ' + bilinfoData.totalCount + ', Afdelinger: ' + bilinfoData.departmentCount);
   } else {
     Logger.log('Bilinfo data was null, not writing to sheet');
@@ -397,7 +455,7 @@ function runMvpForRow_(sh, row) {
   
   // AJ (36): Notes - set separately
   if (result.notes) {
-    sh.getRange(row, 36).setValue(result.notes);
+    sh.getRange(row, COL.NOTES).setValue(result.notes);
   }
   
   // Update headers with accounting year if available
@@ -409,8 +467,8 @@ function runMvpForRow_(sh, row) {
     // Generel error handling for hele funktionen
     var errorMsg = 'Error: ' + (e.message || e);
     try {
-      sh.getRange(row, 36).setValue(errorMsg); // Notes (AJ)
-      sh.getRange(row, 34).setValue(new Date()); // Last run (AH)
+      sh.getRange(row, COL.NOTES).setValue(errorMsg); // Notes (AJ)
+      sh.getRange(row, COL.LAST_RUN).setValue(new Date()); // Last run (AH)
     } catch (e2) {
       Logger.log('Cannot write error to row ' + row + ': ' + e2.message);
     }
@@ -445,7 +503,7 @@ function generateAiBriefingForSelection() {
     for (var r = startRow; r < startRow + numRows; r++) {
       if (r === 1) continue; // Skip header
       
-      var url = (sh.getRange(r, 1).getValue() || '').toString().trim();
+      var url = (sh.getRange(r, COL.URL).getValue() || '').toString().trim();
       if (!url) continue;
       
       try {
@@ -454,7 +512,7 @@ function generateAiBriefingForSelection() {
         Utilities.sleep(1000); // Rate limiting between AI calls
       } catch (e) {
         errors++;
-        sh.getRange(r, 32).setValue('AI briefing failed: ' + e.message);
+        sh.getRange(r, COL.CAR_MARKETPLACES).setValue('AI briefing failed: ' + e.message);
         Logger.log('AI briefing error row ' + r + ': ' + e.message);
       }
     }
@@ -477,59 +535,59 @@ function generateAiBriefingForSelection() {
 }
 
 function generateAiBriefingForRow_(sh, row) {
-  var url = (sh.getRange(row, 1).getValue() || '').toString().trim();
+  var url = (sh.getRange(row, COL.URL).getValue() || '').toString().trim();
   if (!url) return;
   
   // Read comprehensive data from sheet - ALL new columns
   var result = {
     // GRUNDDATA (A-E)
-    domain: sh.getRange(row, 2).getValue() || '',
-    cvr: sh.getRange(row, 3).getValue() || '',
-    phone: sh.getRange(row, 4).getValue() || '',
-    email: sh.getRange(row, 5).getValue() || '',
+    domain: sh.getRange(row, COL.DOMAIN).getValue() || '',
+    cvr: sh.getRange(row, COL.CVR).getValue() || '',
+    phone: sh.getRange(row, COL.PHONE).getValue() || '',
+    email: sh.getRange(row, COL.EMAIL).getValue() || '',
     
     // TEKNOLOGI & PLATFORM (F-J)
-    websitePlatform: sh.getRange(row, 6).getValue() || '',
-    carDealerPlatform: sh.getRange(row, 7).getValue() || '',
-    mobileReady: sh.getRange(row, 8).getValue() || '',
-    cmp: sh.getRange(row, 9).getValue() || '',
-    chatWidget: sh.getRange(row, 10).getValue() || '',
+    websitePlatform: sh.getRange(row, COL.WEBSITE_PLATFORM).getValue() || '',
+    carDealerPlatform: sh.getRange(row, COL.CAR_DEALER_PLATFORM).getValue() || '',
+    mobileReady: sh.getRange(row, COL.MOBILE_READY).getValue() || '',
+    cmp: sh.getRange(row, COL.CMP_COOKIE_VENDOR).getValue() || '',
+    chatWidget: sh.getRange(row, COL.CHAT_WIDGET).getValue() || '',
     
     // TRACKING & ANALYTICS (K-Q)
-    ga4: sh.getRange(row, 11).getValue() || '',
-    ga4Ids: (sh.getRange(row, 12).getValue() || '').toString().split(',').map(function(s) { return s.trim(); }).filter(Boolean),
-    gtm: sh.getRange(row, 13).getValue() || '',
-    gtmIds: (sh.getRange(row, 14).getValue() || '').toString().split(',').map(function(s) { return s.trim(); }).filter(Boolean),
-    metaPixel: sh.getRange(row, 15).getValue() || '',
-    metaPixelIds: (sh.getRange(row, 16).getValue() || '').toString().split(',').map(function(s) { return s.trim(); }).filter(Boolean),
-    googleAdsTag: sh.getRange(row, 17).getValue() || '',
+    ga4: sh.getRange(row, COL.GA4).getValue() || '',
+    ga4Ids: (sh.getRange(row, COL.GA4_IDS).getValue() || '').toString().split(',').map(function(s) { return s.trim(); }).filter(Boolean),
+    gtm: sh.getRange(row, COL.GTM).getValue() || '',
+    gtmIds: (sh.getRange(row, COL.GTM_IDS).getValue() || '').toString().split(',').map(function(s) { return s.trim(); }).filter(Boolean),
+    metaPixel: sh.getRange(row, COL.META_PIXEL).getValue() || '',
+    metaPixelIds: (sh.getRange(row, COL.META_PIXEL_IDS).getValue() || '').toString().split(',').map(function(s) { return s.trim(); }).filter(Boolean),
+    googleAdsTag: sh.getRange(row, COL.GOOGLE_ADS_TAG).getValue() || '',
     
     // MARKETING TOOLS (R-U)
-    googleAdsAWIds: (sh.getRange(row, 18).getValue() || '').toString().split(',').map(function(s) { return s.trim(); }).filter(Boolean),
-    emailPlatform: sh.getRange(row, 19).getValue() || '',
-    contactForms: sh.getRange(row, 20).getValue() || '',
-    hasBlog: sh.getRange(row, 21).getValue() || '',
+    googleAdsAWIds: (sh.getRange(row, COL.GOOGLE_ADS_AW_IDS).getValue() || '').toString().split(',').map(function(s) { return s.trim(); }).filter(Boolean),
+    emailPlatform: sh.getRange(row, COL.EMAIL_PLATFORM).getValue() || '',
+    contactForms: sh.getRange(row, COL.CONTACT_FORMS).getValue() || '',
+    hasBlog: sh.getRange(row, COL.BLOG).getValue() || '',
     
     // BUSINESS DATA (V-Y)
-    proffLink: sh.getRange(row, 22).getValue() || '',
-    revenue: sh.getRange(row, 23).getValue() || '',
-    profit: sh.getRange(row, 24).getValue() || '',
-    employees: sh.getRange(row, 25).getValue() || '',
+    proffLink: sh.getRange(row, COL.PROFF_LINK).getValue() || '',
+    revenue: sh.getRange(row, COL.REVENUE).getValue() || '',
+    profit: sh.getRange(row, COL.PROFIT).getValue() || '',
+    employees: sh.getRange(row, COL.EMPLOYEES).getValue() || '',
     
     // KONKURRENCE & SOCIAL (Z-AB)
-    competitors: (sh.getRange(row, 26).getValue() || '').toString().split(',').map(function(s) { return s.trim(); }).filter(Boolean),
-    socialMedia: (sh.getRange(row, 27).getValue() || '').toString().split(',').map(function(s) { return s.trim(); }).filter(Boolean),
-    adPlatforms: (sh.getRange(row, 28).getValue() || '').toString().split(',').map(function(s) { return s.trim(); }).filter(Boolean),
+    competitors: (sh.getRange(row, COL.COMPETITORS).getValue() || '').toString().split(',').map(function(s) { return s.trim(); }).filter(Boolean),
+    socialMedia: (sh.getRange(row, COL.SOCIAL_MEDIA).getValue() || '').toString().split(',').map(function(s) { return s.trim(); }).filter(Boolean),
+    adPlatforms: (sh.getRange(row, COL.AD_PLATFORMS).getValue() || '').toString().split(',').map(function(s) { return s.trim(); }).filter(Boolean),
     
     // MEDIA & INDHOLD (AC-AF)
-    videoMarketing: sh.getRange(row, 29).getValue() || '',
-    carBrands: sh.getRange(row, 30).getValue() || '',
-    trustpilot: sh.getRange(row, 31).getValue() || '',
-    carMarketplaces: sh.getRange(row, 32).getValue() || ''
+    videoMarketing: sh.getRange(row, COL.VIDEO_MARKETING).getValue() || '',
+    carBrands: sh.getRange(row, COL.CAR_BRANDS).getValue() || '',
+    trustpilot: sh.getRange(row, COL.TRUSTPILOT).getValue() || '',
+    carMarketplaces: sh.getRange(row, COL.CAR_MARKETPLACES).getValue() || ''
   };
   
   var briefing = generateBriefingGemini_(url, result);
-  sh.getRange(row, 35).setValue(briefing);  // AI kolonne (AI Briefing)
+  sh.getRange(row, COL.AI_BRIEFING).setValue(briefing);  // AI kolonne (AI Briefing)
 }
 
 function scanWebsite_(url, maxPages) {
@@ -2153,11 +2211,11 @@ function extractAccountingYear_(html) {
 function updateProffHeaders_(sh, year) {
   // Update Proff column headers to include accounting year
   // Only update if not already set
-  var currentHeader = sh.getRange(1, 23).getValue();
+  var currentHeader = sh.getRange(1, COL.REVENUE).getValue();
   if (currentHeader.indexOf(year) === -1) {
-    sh.getRange(1, 23).setValue('Proff Omsætning ' + year);
-    sh.getRange(1, 24).setValue('Proff Resultat ' + year);
-    sh.getRange(1, 25).setValue('Proff Ansatte ' + year);
+    sh.getRange(1, COL.REVENUE).setValue('Proff Omsætning ' + year);
+    sh.getRange(1, COL.PROFIT).setValue('Proff Resultat ' + year);
+    sh.getRange(1, COL.EMPLOYEES).setValue('Proff Ansatte ' + year);
     Logger.log('Updated Proff headers with year: ' + year);
   }
 }
@@ -2489,10 +2547,10 @@ function createSalesPitchPresentation() {
     // Åbn præsentationen
     var url = 'https://docs.google.com/presentation/d/' + presentationId + '/edit';
     
-    // Gem URL i Notes (kolonne AG = 33)
-    var currentNotes = sh.getRange(row, 33).getValue();
+    // Gem URL i Notes (kolonne AJ)
+    var currentNotes = sh.getRange(row, COL.NOTES).getValue();
     var newNotes = currentNotes ? currentNotes + '\n[Pitch: ' + url + ']' : '[Pitch: ' + url + ']';
-    sh.getRange(row, 33).setValue(newNotes);
+    sh.getRange(row, COL.NOTES).setValue(newNotes);
     
     logSuccess_('PRESENTATION_CREATED', 'Pitch for ' + leadData.domain + ': ' + url, row);
     
