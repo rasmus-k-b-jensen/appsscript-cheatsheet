@@ -1408,11 +1408,34 @@ function detectTrustpilot_(html) {
   
   if (!hasTrustpilot) return 'Ingen';
   
-  // Try to extract rating if visible in HTML
+  // Try to extract Trustpilot company URL
+  var trustpilotUrl = null;
+  var urlPatterns = [
+    /https?:\/\/(?:www\.|dk\.)?trustpilot\.com\/review\/([a-zA-Z0-9\-\.]+)/i,
+    /data-businessunit-id=["']([a-f0-9\-]+)["']/i, // Widget business unit ID
+    /data-template-id=["']([a-f0-9\-]+)["']/i
+  ];
+  
+  for (var i = 0; i < urlPatterns.length; i++) {
+    var match = html.match(urlPatterns[i]);
+    if (match && match[1]) {
+      if (i === 0) {
+        // Direct URL match - we have the domain
+        trustpilotUrl = 'https://www.trustpilot.com/review/' + match[1];
+        Logger.log('Found Trustpilot URL: ' + trustpilotUrl);
+        break;
+      }
+    }
+  }
+  
+  // Try to extract rating from embedded JSON-LD or meta tags first
   var ratingPatterns = [
     /"ratingValue"\s*:\s*"?([\d.]+)"?/i,
+    /"aggregateRating"[^}]*"ratingValue"\s*:\s*"?([\d.]+)"?/i,
     /trustScore['"]\s*:\s*"?([\d.]+)"?/i,
-    /stars:\s*"?([\d.]+)"?/i
+    /stars:\s*"?([\d.]+)"?/i,
+    /data-stars=["']([\d.]+)["']/i,
+    /TrustScore[^\d]+([\d.]+)/i
   ];
   
   for (var i = 0; i < ratingPatterns.length; i++) {
@@ -1420,8 +1443,47 @@ function detectTrustpilot_(html) {
     if (match && match[1]) {
       var rating = parseFloat(match[1]);
       if (rating >= 1 && rating <= 5) {
+        Logger.log('Found Trustpilot rating in HTML: ' + rating);
         return rating.toFixed(1) + '★';
       }
+    }
+  }
+  
+  // If we have a URL, try to fetch the actual rating from Trustpilot
+  if (trustpilotUrl) {
+    try {
+      Utilities.sleep(FETCH_DELAY_MS);
+      var response = UrlFetchApp.fetch(trustpilotUrl, {
+        muteHttpExceptions: true,
+        followRedirects: true,
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (compatible; AutoUncleCheatSheet/2.2)'
+        }
+      });
+      
+      if (response.getResponseCode() === 200) {
+        var pageHtml = response.getContentText();
+        
+        // Try to extract from Trustpilot page
+        var trustpilotPagePatterns = [
+          /"ratingValue"\s*:\s*"?([\d.]+)"?/i,
+          /TrustScore[^\d]+([\d.]+)/i,
+          /class="[^"]*rating[^"]*"[^>]*>([\d.]+)/i
+        ];
+        
+        for (var i = 0; i < trustpilotPagePatterns.length; i++) {
+          var match = pageHtml.match(trustpilotPagePatterns[i]);
+          if (match && match[1]) {
+            var rating = parseFloat(match[1]);
+            if (rating >= 1 && rating <= 5) {
+              Logger.log('Found Trustpilot rating from page: ' + rating);
+              return rating.toFixed(1) + '★';
+            }
+          }
+        }
+      }
+    } catch (e) {
+      Logger.log('Failed to fetch Trustpilot page: ' + e.message);
     }
   }
   
