@@ -71,14 +71,15 @@ var COL = {
   TRUSTPILOT: 31,
   CAR_MARKETPLACES: 32,
   
-  // METADATA (AG-AM)
+  // METADATA (AG-AN)
   PAGES_SCANNED: 33,
   LAST_RUN: 34,
   AI_BRIEFING: 35,
   NOTES: 36,
-  AUTOUCLE_ADMIN: 37,
-  BILINFO_ANTAL: 38,
-  BILINFO_AFDELINGER: 39
+  AUTOUNCLE_ADMIN: 37,
+  TIME_IN_STATE: 38,
+  BILINFO_ANTAL: 39,
+  BILINFO_AFDELINGER: 40
 };
 
 // Exclusions to avoid wasting crawl budget on assets and noise
@@ -182,7 +183,7 @@ function setupHeaders() {
       // MEDIA & INDHOLD (AC-AF)
       'Video Marketing','Bilmærker','Trustpilot Rating','Bil Salgsplatforme',
       // METADATA (AG-AM)
-      'Pages scanned','Last run','AI Briefing','Notes','AutoUncle Admin','Bilinfo Antal','Afdelinger (Bilinfo)'
+      'Pages scanned','Last run','AI Briefing','Notes','AutoUncle Admin','Time in State','Bilinfo Antal','Afdelinger (Bilinfo)'
     ];
 
     sh.getRange(1, 1, 1, headers.length).setValues([headers]);
@@ -406,7 +407,7 @@ function runMvpForRow_(sh, row) {
   sh.getRange(row, COL.GOOGLE_ADS_AW_IDS, 1, 4).setValues(batchData4);
   
   // BUSINESS DATA - Proff.dk (V-Y: 4 cols)
-  var proffData = scrapeProffData_(result.cvr, domain);
+  var proffData = scrapeProffData_(result.cvr, domain, result.phone);
   sh.getRange(row, COL.PROFF_LINK).setValue(proffData.proffUrl || 'N/A');  // V: Proff link
   
   if (proffData.revenue) {
@@ -442,18 +443,29 @@ function runMvpForRow_(sh, row) {
   ]];
   sh.getRange(row, COL.VIDEO_MARKETING, 1, 4).setValues(batchData6);
   
-  // METADATA (AG-AM: 7 cols) - AG (Pages scanned), AH (Last run), skip AI (35) and AJ (36), AK (AutoUncle Admin), AL (Bilinfo Antal), AM (Afdelinger Bilinfo)
+  // METADATA (AG-AN: 8 cols) - AG (Pages scanned), AH (Last run), skip AI (35) and AJ (36), AK (AutoUncle Admin), AL (Time in State), AM (Bilinfo Antal), AN (Afdelinger Bilinfo)
   sh.getRange(row, COL.PAGES_SCANNED, 1, 1).setValues([[result.pagesScanned.join(' | ')]]);  // AG: Pages scanned
   sh.getRange(row, COL.LAST_RUN, 1, 1).setValues([[new Date()]]);                        // AH: Last run
-  sh.getRange(row, COL.AUTOUCLE_ADMIN, 1, 1).setValues([[result.autoUncleStatus || 'N/A']]);     // AK: AutoUncle Admin
   
-  // AL & AM: Bilinfo Antal + Afdelinger - Fetch from Bilinfo API
+  // AK & AL: AutoUncle Admin status and time in state
+  var autoUncleStatusText = 'N/A';
+  var timeInState = 'N/A';
+  if (result.autoUncleStatus && typeof result.autoUncleStatus === 'object') {
+    autoUncleStatusText = result.autoUncleStatus.status || 'N/A';
+    timeInState = result.autoUncleStatus.duration || 'N/A';
+  } else if (result.autoUncleStatus) {
+    autoUncleStatusText = result.autoUncleStatus;
+  }
+  sh.getRange(row, COL.AUTOUNCLE_ADMIN, 1, 1).setValues([[autoUncleStatusText]]);     // AK: AutoUncle Admin
+  sh.getRange(row, COL.TIME_IN_STATE, 1, 1).setValues([[timeInState]]);              // AL: Time in State
+  
+  // AM & AN: Bilinfo Antal + Afdelinger - Fetch from Bilinfo API
   Logger.log('Attempting to fetch Bilinfo data for domain: ' + domain);
   var bilinfoData = fetchBilinfoCountForDomain_(domain);
   Logger.log('Bilinfo data result: ' + JSON.stringify(bilinfoData));
   if (bilinfoData !== null) {
-    sh.getRange(row, COL.BILINFO_ANTAL, 1, 1).setValues([[bilinfoData.totalCount]]);  // AL: Bilinfo Antal
-    sh.getRange(row, COL.BILINFO_AFDELINGER, 1, 1).setValues([[bilinfoData.departmentCount]]);  // AM: Afdelinger (Bilinfo)
+    sh.getRange(row, COL.BILINFO_ANTAL, 1, 1).setValues([[bilinfoData.totalCount]]);  // AM: Bilinfo Antal
+    sh.getRange(row, COL.BILINFO_AFDELINGER, 1, 1).setValues([[bilinfoData.departmentCount]]);  // AN: Afdelinger (Bilinfo)
     Logger.log('Wrote Bilinfo data - Biler: ' + bilinfoData.totalCount + ', Afdelinger: ' + bilinfoData.departmentCount);
   } else {
     Logger.log('Bilinfo data was null, not writing to sheet');
@@ -728,14 +740,20 @@ function scanWebsite_(url, maxPages) {
   var videoMarketing = detectVideoMarketingEnhanced_(allHtml);
   var emailPlatform = detectEmailPlatform_(allHtml);
   var carBrands = detectCarBrands_(allHtml);
-  var trustpilot = detectTrustpilot_(allHtml);
   
-  // Extract domain from base URL for marketplace detection
+  // Extract domain from base URL
   var domain = baseUrl.replace(/^https?:\/\/(www\.)?/, '').replace(/\/.*$/, '');
-  var carMarketplaces = detectCarMarketplacePlatforms_(allHtml, domain);
   
-  // Extract dealer name from domain for AutoUncle check
-  var dealerName = domain.replace(/\.(dk|com|no|se)$/, '');
+  // Get dealer name: Try Bilinfo first (most accurate), fallback to domain
+  var dealerName = getDealerNameFromBilinfo_(domain);
+  if (!dealerName) {
+    // Fallback: extract from domain
+    dealerName = domain.replace(/\.(dk|com|no|se)$/, '');
+  }
+  
+  // Use dealer name for better matching
+  var trustpilot = detectTrustpilot_(allHtml, dealerName, domain);
+  var carMarketplaces = detectCarMarketplacePlatforms_(allHtml, domain, dealerName);
   var autoUncleStatus = checkAutoUncleAdmin_(dealerName, domain);
 
   return {
@@ -833,7 +851,8 @@ function extractCvr_(html) {
   if (contextualHtml) {
     var contextMatches = extractAll_(contextualHtml, /\b(\d{8})\b/g, 1);
     for (var i = 0; i < contextMatches.length; i++) {
-      if (isValidCvrFormat_(contextMatches[i])) {
+      // CRITICAL: Check that it's NOT a phone number before adding as CVR
+      if (isValidCvrFormat_(contextMatches[i]) && !isLikelyPhoneNumber_(contextMatches[i], contextualHtml)) {
         candidates.push({ cvr: contextMatches[i], score: 70 });
       }
     }
@@ -884,13 +903,22 @@ function extractCvr_(html) {
   // Sort by score descending
   unique.sort(function(a, b) { return b.score - a.score; });
   
-  // Return highest confidence CVR that passes validation
+  // CRITICAL: Only return CVR with HIGH confidence (score >= 80)
+  // This prevents phone numbers from being used as CVR
+  var MINIMUM_CVR_CONFIDENCE = 80; // Requires: Schema.org, explicit CVR label, or external link
+  
   for (var i = 0; i < unique.length; i++) {
     if (isValidCvrFormat_(unique[i].cvr)) {
-      return unique[i].cvr;
+      if (unique[i].score >= MINIMUM_CVR_CONFIDENCE) {
+        Logger.log('CVR extracted with HIGH confidence: ' + unique[i].cvr + ' (score: ' + unique[i].score + ')');
+        return unique[i].cvr;
+      } else {
+        Logger.log('CVR candidate rejected (too low confidence): ' + unique[i].cvr + ' (score: ' + unique[i].score + ' < ' + MINIMUM_CVR_CONFIDENCE + ')');
+      }
     }
   }
   
+  Logger.log('No high-confidence CVR found');
   return '';
 }
 
@@ -940,6 +968,73 @@ function isValidCvrFormat_(cvr) {
   if (num < 10000000) return false;
   
   return true;
+}
+
+/**
+ * Check if an 8-digit number is likely a phone number based on context.
+ * @param {string} number - The 8-digit number to check
+ * @param {string} context - Surrounding HTML context (500 chars before/after)
+ * @return {boolean} True if number is likely a phone number
+ */
+function isLikelyPhoneNumber_(number, context) {
+  // Danish phone numbers often start with specific prefixes
+  // Mobile: 2, 30, 31, 40-42, 50-53, 60-61, 71, 81, 91-93
+  // Landline: 3, 4, 5, 6, 7, 8, 9 (but not mobile prefixes)
+  
+  var firstTwo = number.substring(0, 2);
+  var mobilePreffixes = ['20', '21', '22', '23', '24', '25', '26', '27', '28', '29',
+                          '30', '31', '40', '41', '42', '50', '51', '52', '53',
+                          '60', '61', '71', '81', '91', '92', '93'];
+  
+  var isMobilePrefix = mobilePreffixes.indexOf(firstTwo) !== -1;
+  
+  // If we have context, check for phone-related keywords nearby
+  if (context) {
+    // Get 200 chars before and after the number
+    var numPos = context.indexOf(number);
+    if (numPos !== -1) {
+      var start = Math.max(0, numPos - 200);
+      var end = Math.min(context.length, numPos + number.length + 200);
+      var surroundingText = context.substring(start, end).toLowerCase();
+      
+      // Phone keywords (Danish and English)
+      var phoneKeywords = ['tlf', 'tel', 'telefon', 'phone', 'mobil', 'mobile', 
+                           'ring', 'call', 'kontakt os', 'contact', '+45'];
+      
+      // CVR keywords should NOT appear near phone numbers
+      var cvrKeywords = ['cvr', 'vat', 'org.nr', 'organisationsnummer'];
+      
+      var hasPhoneKeyword = phoneKeywords.some(function(keyword) {
+        return surroundingText.indexOf(keyword) !== -1;
+      });
+      
+      var hasCvrKeyword = cvrKeywords.some(function(keyword) {
+        return surroundingText.indexOf(keyword) !== -1;
+      });
+      
+      // If CVR keyword nearby, it's NOT a phone number
+      if (hasCvrKeyword) return false;
+      
+      // If phone keyword nearby, it IS a phone number
+      if (hasPhoneKeyword) return true;
+      
+      // Check for formatted phone patterns (XX XX XX XX or XX-XX-XX-XX)
+      var spacedPattern = number.substring(0,2) + '\\s+' + number.substring(2,4) + '\\s+' + 
+                         number.substring(4,6) + '\\s+' + number.substring(6,8);
+      var dashedPattern = number.substring(0,2) + '-' + number.substring(2,4) + '-' + 
+                         number.substring(4,6) + '-' + number.substring(6,8);
+      
+      if (new RegExp(spacedPattern).test(context) || new RegExp(dashedPattern).test(context)) {
+        return true;
+      }
+    }
+  }
+  
+  // If mobile prefix but no context clues, lean towards phone number
+  if (isMobilePrefix) return true;
+  
+  // Default: could be either, so don't filter it out
+  return false;
 }
 
 /**
@@ -1400,15 +1495,17 @@ function detectCarBrands_(html) {
 /**
  * Detect Trustpilot rating
  * @param {string} html - The HTML content to search
+ * @param {string} dealerName - Dealer name from Bilinfo (optional)
+ * @param {string} domain - Domain name (fallback)
  * @return {string} Rating with review count or 'Ingen'
  */
-function detectTrustpilot_(html) {
+function detectTrustpilot_(html, dealerName, domain) {
   // Find Trustpilot widget or link
   var hasTrustpilot = /trustpilot\.com/i.test(html);
   
   if (!hasTrustpilot) return 'Ingen';
   
-  // Try to extract Trustpilot company URL
+  // Try to extract Trustpilot company URL from HTML
   var trustpilotUrl = null;
   var urlPatterns = [
     /https?:\/\/(?:www\.|dk\.)?trustpilot\.com\/review\/([a-zA-Z0-9\-\.]+)/i,
@@ -1422,10 +1519,23 @@ function detectTrustpilot_(html) {
       if (i === 0) {
         // Direct URL match - we have the domain
         trustpilotUrl = 'https://www.trustpilot.com/review/' + match[1];
-        Logger.log('Found Trustpilot URL: ' + trustpilotUrl);
+        Logger.log('Found Trustpilot URL in HTML: ' + trustpilotUrl);
         break;
       }
     }
+  }
+  
+  // If no URL found in HTML, try to construct from dealer name or domain
+  if (!trustpilotUrl && (dealerName || domain)) {
+    var searchTerm = dealerName || domain;
+    // Normalize for Trustpilot URL format (lowercase, replace spaces with hyphens)
+    var normalized = searchTerm.toLowerCase()
+      .replace(/\s+/g, '-')
+      .replace(/[^a-z0-9\-]/g, '')
+      .replace(/\.(dk|com|no|se)$/, '');
+    
+    trustpilotUrl = 'https://www.trustpilot.com/review/' + normalized;
+    Logger.log('Constructed Trustpilot URL from ' + (dealerName ? 'dealer name' : 'domain') + ': ' + trustpilotUrl);
   }
   
   // Try to extract rating from embedded JSON-LD or meta tags first
@@ -1481,6 +1591,9 @@ function detectTrustpilot_(html) {
             }
           }
         }
+      } else if (response.getResponseCode() === 404) {
+        Logger.log('Trustpilot page not found (404) - company may not be on Trustpilot');
+        return 'Ingen';
       }
     } catch (e) {
       Logger.log('Failed to fetch Trustpilot page: ' + e.message);
@@ -1536,20 +1649,39 @@ function detectVideoMarketingEnhanced_(html) {
  * @param {string} domain - Domain name (e.g., "ring-biler.dk")
  * @return {string} Formatted text with platform links, or 'Ingen'
  */
-function detectCarMarketplacePlatforms_(html, domain) {
+function detectCarMarketplacePlatforms_(html, domain, dealerName) {
   if (!html || !domain) return 'Ingen';
   
   var results = [];
   var lowerHtml = html.toLowerCase();
   
-  // Extract dealer name from domain (remove .dk/.com etc)
-  var dealerName = domain.replace(/\.(dk|com|net|org)$/i, '').toLowerCase();
+  // Use dealer name from Bilinfo if available, otherwise extract from domain
+  var searchName = '';
+  if (dealerName) {
+    searchName = dealerName.toLowerCase();
+    Logger.log('Using Bilinfo dealer name for marketplace search: ' + searchName);
+  } else {
+    // Fallback: extract from domain (remove .dk/.com etc)
+    searchName = domain.replace(/\.(dk|com|net|org)$/i, '').toLowerCase();
+    Logger.log('Using domain for marketplace search: ' + searchName);
+  }
   
-  // Create variations - only full name with/without dash
+  // Create variations - full name with/without spaces and dashes
   var nameVariations = [
-    dealerName,                           // ring-biler (original)
-    dealerName.replace(/-/g, '')          // ringbiler (no dash)
+    searchName,                                  // Via Biler (original)
+    searchName.replace(/\s+/g, ''),             // ViaBiler (no spaces)
+    searchName.replace(/\s+/g, '-'),            // Via-Biler (spaces to dashes)
+    searchName.replace(/\s+/g, '').toLowerCase() // viabiler (normalized)
   ];
+  
+  // Remove duplicates
+  var uniqueVariations = [];
+  for (var i = 0; i < nameVariations.length; i++) {
+    if (uniqueVariations.indexOf(nameVariations[i]) === -1) {
+      uniqueVariations.push(nameVariations[i]);
+    }
+  }
+  nameVariations = uniqueVariations;
   
   // AutoUncle - check paa_gensyn pattern
   var autouncleUrl = '';
@@ -1903,23 +2035,88 @@ function generateBriefingGemini_(url, result) {
 }
 
 /**
+ * Look up dealer name from Bilinfo Data sheet by domain.
+ * Returns the base dealer name (without department suffix).
+ * @param {string} domain - Domain to look up
+ * @return {string} Dealer name or empty string if not found
+ */
+function getDealerNameFromBilinfo_(domain) {
+  try {
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var bilinfoSheet = ss.getSheetByName('Bilinfo Data');
+    
+    if (!bilinfoSheet) {
+      Logger.log('Bilinfo Data sheet not found - skipping Bilinfo lookup');
+      return '';
+    }
+    
+    var lastRow = bilinfoSheet.getLastRow();
+    if (lastRow < 2) {
+      Logger.log('Bilinfo Data sheet is empty');
+      return '';
+    }
+    
+    // Get all data (Domain in col 1, DealerName in col 2, Afdeling in col 3)
+    var data = bilinfoSheet.getRange(2, 1, lastRow - 1, 3).getValues();
+    
+    // Normalize domain for matching
+    var normalizedDomain = domain.toLowerCase().replace(/^www\./, '').trim();
+    
+    for (var i = 0; i < data.length; i++) {
+      var row = data[i];
+      var rowDomain = String(row[0] || '').toLowerCase().trim();
+      var dealerName = String(row[1] || '').trim();
+      var afdeling = String(row[2] || '').trim();
+      
+      if (rowDomain === normalizedDomain && dealerName) {
+        // Remove department suffix if present (e.g., "Via Biler - Aarhus" → "Via Biler")
+        var baseName = dealerName;
+        if (afdeling && dealerName.indexOf(' - ') !== -1) {
+          // Extract base name before the dash
+          baseName = dealerName.split(' - ')[0].trim();
+        }
+        
+        Logger.log('Found dealer in Bilinfo: ' + dealerName + ' → base name: ' + baseName);
+        return baseName;
+      }
+    }
+    
+    Logger.log('Domain not found in Bilinfo Data: ' + domain);
+    return '';
+    
+  } catch (e) {
+    Logger.log('Error looking up Bilinfo dealer name: ' + e.message);
+    return '';
+  }
+}
+
+/**
  * Build Proff.dk search URL from CVR or domain.
- * @param {string} cvr - CVR number (preferred, 8 digits)
+ * @param {string} cvr - CVR number (ONLY use if high confidence, 8 digits)
+ * @param {string} dealerName - Dealer name from Bilinfo (preferred over domain)
  * @param {string} domain - Domain name (fallback)
  * @return {string} Proff.dk search URL or empty string
  */
-function buildProffSearchLink_(cvr, domain) {
-  // Proff.dk uses internal IDs in URLs, but we can create a precise search link
-  // that will likely show the company as first result
+function buildProffSearchLink_(cvr, dealerName, domain) {
+  // PRIORITY: CVR (if high confidence) > Bilinfo dealer name > domain
+  // CVR is most precise, but ONLY use it if we're confident it's not a phone number
   
   if (cvr && cvr.length === 8) {
-    // Search by CVR number - most precise
+    // Search by CVR number - most precise (extractCvr_ only returns CVR with score >= 80)
+    Logger.log('Using CVR for Proff search (high confidence): ' + cvr);
     return 'https://www.proff.dk/branches%C3%B8g?q=' + encodeURIComponent(cvr);
+  }
+  
+  if (dealerName) {
+    // Use dealer name from Bilinfo (second most precise)
+    Logger.log('Using Bilinfo dealer name for Proff search: ' + dealerName);
+    return 'https://www.proff.dk/branches%C3%B8g?q=' + encodeURIComponent(dealerName);
   }
   
   if (domain) {
     // Fallback: Search by domain name (remove TLD and www)
     var cleanDomain = domain.replace(/^www\./, '').replace(/\.[a-z]{2,}$/i, '');
+    Logger.log('Using domain for Proff search: ' + cleanDomain);
     return 'https://www.proff.dk/branches%C3%B8g?q=' + encodeURIComponent(cleanDomain);
   }
   
@@ -1930,16 +2127,20 @@ function buildProffSearchLink_(cvr, domain) {
  * Scrape Proff.dk for financial data (revenue, profit, employees).
  * @param {string} cvr - CVR number for company lookup
  * @param {string} domain - Domain name (fallback if no CVR)
+ * @param {string} phone - Phone number for validation (optional)
  * @return {Object} Object with proffUrl, revenue, profit, employees, year properties
  */
-function scrapeProffData_(cvr, domain) {
+function scrapeProffData_(cvr, domain, phone) {
   if (!cvr && !domain) {
     return { proffUrl: '', revenue: '', profit: '', employees: '' };
   }
   
   try {
-    // Step 1: Search Proff.dk
-    var searchUrl = buildProffSearchLink_(cvr, domain);
+    // Step 0: Try to get dealer name from Bilinfo (most accurate for car dealers)
+    var dealerName = getDealerNameFromBilinfo_(domain);
+    
+    // Step 1: Search Proff.dk (prioritize: CVR > Bilinfo name > domain)
+    var searchUrl = buildProffSearchLink_(cvr, dealerName, domain);
     Utilities.sleep(FETCH_DELAY_MS); // Rate limiting
     
     var searchResp = UrlFetchApp.fetch(searchUrl, {
@@ -1964,8 +2165,8 @@ function scrapeProffData_(cvr, domain) {
       return { proffUrl: searchUrl, revenue: '', profit: '', employees: '' };
     }
     
-    // Find best matching link
-    var bestLink = findBestProffMatch_(allLinks, searchHtml, cvr, domain);
+    // Find best matching link (pass all validation data: CVR, dealer name, domain, phone)
+    var bestLink = findBestProffMatch_(allLinks, searchHtml, cvr, dealerName, domain, phone);
     if (!bestLink) {
       Logger.log('No matching company found in Proff results');
       return { proffUrl: searchUrl, revenue: '', profit: '', employees: '' };
@@ -2020,12 +2221,37 @@ function scrapeProffData_(cvr, domain) {
   }
 }
 
-function findBestProffMatch_(links, searchHtml, cvr, domain) {
-  // Strategy: Score each link and pick the best match
+function findBestProffMatch_(links, searchHtml, cvr, dealerName, domain, phone) {
+  // Strategy: Multi-source cross-validation for maximum accuracy
+  // 
+  // VALIDATION SOURCES & SCORING:
+  // - CVR exact match: +100 points (highest confidence)
+  // - CVR wrong match: -100 points (reject immediately)
+  // - Phone number match: +60 points (high confidence)
+  // - Phone in CVR context: -50 points (likely wrong extraction)
+  // - Company name similarity: up to +50 points (based on Jaccard similarity)
+  // - Name in URL: +20 points
+  // - Domain match: +30 points
+  //
+  // THRESHOLDS:
+  // - Minimum score: 60 (requires at least one strong signal)
+  // - Confident score: 100 (CVR match OR multiple validations)
+  //
+  // EXAMPLES:
+  // - CVR match only: 100 points → HIGH confidence
+  // - Phone + Name (70%): 60 + 35 = 95 → MEDIUM confidence
+  // - Name (90%) + Domain: 45 + 30 = 75 → MEDIUM confidence
+  // - Name only (50%): 25 → REJECTED (below threshold)
   
-  var companyName = domain ? domain.replace(/^www\./, '').replace(/\.[a-z]{2,}$/i, '') : '';
+  var companyName = '';
+  if (dealerName) {
+    companyName = dealerName;
+    Logger.log('Proff matching: CVR=' + cvr + ', phone=' + phone + ', dealerName=' + dealerName + ' (from Bilinfo), domain=' + domain);
+  } else {
+    companyName = domain ? domain.replace(/^www\./, '').replace(/\.[a-z]{2,}$/i, '') : '';
+    Logger.log('Proff matching: CVR=' + cvr + ', phone=' + phone + ', domain=' + domain + ', companyName=' + companyName);
+  }
   
-  Logger.log('Proff matching: CVR=' + cvr + ', domain=' + domain + ', companyName=' + companyName);
   Logger.log('Found ' + links.length + ' links in search results');
   
   var scores = [];
@@ -2033,17 +2259,26 @@ function findBestProffMatch_(links, searchHtml, cvr, domain) {
   for (var i = 0; i < links.length; i++) {
     var link = links[i];
     var score = 0;
+    var rejectReason = '';
     
-    // Score 1: Exact CVR match in context (highest priority)
+    // Extract context around this link
+    var linkPos = searchHtml.indexOf('href="' + link + '"');
+    var context = '';
+    if (linkPos !== -1) {
+      var start = Math.max(0, linkPos - 1000);
+      var end = Math.min(searchHtml.length, linkPos + 1000);
+      context = searchHtml.substring(start, end);
+    }
+    
+    // Score 1: CVR validation (highest priority)
     if (cvr) {
-      var linkPos = searchHtml.indexOf('href="' + link + '"');
-      if (linkPos !== -1) {
-        var start = Math.max(0, linkPos - 1000);
-        var end = Math.min(searchHtml.length, linkPos + 1000);
-        var context = searchHtml.substring(start, end);
-        
-        // CRITICAL: Look for CVR with label, then verify the EXACT number
-        // Pattern: "CVR: 12345678" or "CVR 12345678"
+      // CRITICAL CHECK 1: CVR directly in URL (most reliable - Proff generates these)
+      if (link.indexOf(cvr) !== -1) {
+        // Perfect match: CVR is in the URL path itself
+        score += 150;
+        Logger.log('Link ' + i + ': CVR in URL (PERFECT MATCH) (+150)');
+      } else {
+        // CRITICAL CHECK 2: Look for CVR with label in context
         var cvrWithLabelRegex = new RegExp('(?:CVR|cvr)[\\s:\\-]+([0-9]{8})\\b', 'i');
         var cvrMatch = context.match(cvrWithLabelRegex);
         
@@ -2051,46 +2286,211 @@ function findBestProffMatch_(links, searchHtml, cvr, domain) {
           // Perfect: Found "CVR" label followed by our exact CVR
           score += 100;
           Logger.log('Link ' + i + ': Perfect CVR match (CVR label + exact number) (+100)');
-        } else if (cvrMatch) {
-          // Found CVR label but different number - this is NOT our company
-          Logger.log('Link ' + i + ': Found CVR label with different number (' + cvrMatch[1] + '), skipping');
+        } else if (cvrMatch && cvrMatch[1] !== cvr) {
+          // Found CVR label but DIFFERENT number - this is definitely NOT our company
+          rejectReason = 'Wrong CVR (' + cvrMatch[1] + ' vs ' + cvr + ')';
+          score = -100; // Strong negative score to ensure rejection
+          Logger.log('Link ' + i + ': REJECTED - ' + rejectReason);
         } else {
-          // No CVR label found - check standalone occurrence
-          // But ONLY if it's not in the URL itself
+          // CRITICAL CHECK 3: Standalone CVR in context (less reliable)
           var standaloneCvrRegex = new RegExp('\\b' + cvr + '\\b');
-          if (standaloneCvrRegex.test(context) && link.indexOf(cvr) === -1) {
-            score += 50;
-            Logger.log('Link ' + i + ': CVR number found standalone (+50)');
+          if (standaloneCvrRegex.test(context)) {
+            // CRITICAL: Verify it's not a phone number by checking context
+            var phoneKeywords = ['tlf', 'tel', 'telefon', 'phone', 'mobil', 'ring', 'call', '+45'];
+            var hasPhoneContext = phoneKeywords.some(function(kw) {
+              return context.toLowerCase().indexOf(kw) !== -1;
+            });
+            
+            if (hasPhoneContext) {
+              rejectReason = 'CVR appears to be phone number (phone keywords nearby)';
+              score = -50;
+              Logger.log('Link ' + i + ': WARNING - ' + rejectReason);
+            } else {
+              score += 50;
+              Logger.log('Link ' + i + ': CVR number found standalone (+50)');
+            }
           }
         }
       }
     }
     
-    // Score 2: Company name in link
-    if (companyName && companyName.length >= 4) {
-      var linkLower = link.toLowerCase();
-      var nameLower = companyName.toLowerCase().replace(/biler|auto|bil|as|aps/g, '').trim();
+    // Score 2: Phone number validation (high reliability)
+    if (phone && phone.length === 8) {
+      // Normalize phone (remove spaces/dashes)
+      var normalizedPhone = phone.replace(/[\s\-]/g, '');
       
-      if (nameLower && linkLower.indexOf(nameLower) !== -1) {
-        score += 30;
-        Logger.log('Link ' + i + ': Name match in URL (+30)');
+      // Check if phone appears in the result card
+      if (context.indexOf(normalizedPhone) !== -1) {
+        score += 60;
+        Logger.log('Link ' + i + ': Phone number match (+60)');
+      } else {
+        // Also check for formatted versions (XX XX XX XX or XX-XX-XX-XX)
+        var formatted1 = normalizedPhone.substring(0,2) + ' ' + normalizedPhone.substring(2,4) + ' ' + 
+                        normalizedPhone.substring(4,6) + ' ' + normalizedPhone.substring(6,8);
+        var formatted2 = normalizedPhone.substring(0,2) + '-' + normalizedPhone.substring(2,4) + '-' + 
+                        normalizedPhone.substring(4,6) + '-' + normalizedPhone.substring(6,8);
+        
+        if (context.indexOf(formatted1) !== -1 || context.indexOf(formatted2) !== -1) {
+          score += 60;
+          Logger.log('Link ' + i + ': Phone number match (formatted) (+60)');
+        }
       }
     }
     
-    scores.push({ link: link, score: score });
+    // Score 3: Company name similarity
+    if (companyName && companyName.length >= 4) {
+      // Extract company name from the search result card
+      var cardNameMatch = context.match(/<h[2-4][^>]*>(.*?)<\/h[2-4]>/i);
+      var displayedName = cardNameMatch ? cardNameMatch[1].replace(/<[^>]+>/g, '').trim() : '';
+      
+      if (displayedName) {
+        var similarity = calculateNameSimilarity_(companyName, displayedName);
+        if (similarity > 0.5) {
+          // Score based on similarity: 0.5=25pts, 0.7=35pts, 1.0=50pts
+          score += Math.round(similarity * 50); // Max +50 for perfect match
+          Logger.log('Link ' + i + ': Name similarity ' + (similarity * 100).toFixed(0) + '% (+' + Math.round(similarity * 50) + ')');
+        } else if (similarity > 0.3) {
+          // Medium similarity - still useful signal
+          score += Math.round(similarity * 30);
+          Logger.log('Link ' + i + ': Name similarity ' + (similarity * 100).toFixed(0) + '% (medium, +' + Math.round(similarity * 30) + ')');
+        } else {
+          // Very low similarity and no CVR - likely wrong match
+          Logger.log('Link ' + i + ': Low name similarity (' + (similarity * 100).toFixed(0) + '%)');
+        }
+      } else {
+        Logger.log('Link ' + i + ': Could not extract company name from card');
+      }
+      
+      // Also check name in URL
+      var linkLower = link.toLowerCase();
+      var nameLower = companyName.toLowerCase().replace(/\s+/g, '-').replace(/biler|auto|bil/g, '').trim();
+      
+      if (nameLower.length >= 3 && linkLower.indexOf(nameLower) !== -1) {
+        score += 20;
+        Logger.log('Link ' + i + ': Name in URL (+20)');
+      }
+    }
+    
+    // Score 4: Domain validation (if available)
+    if (domain && context) {
+      var cleanDomain = domain.replace(/^www\./, '').toLowerCase();
+      var contextLower = context.toLowerCase();
+      
+      // Check if our domain appears in the company info
+      if (contextLower.indexOf(cleanDomain) !== -1) {
+        score += 30;
+        Logger.log('Link ' + i + ': Domain match in context (+30)');
+      }
+    }
+    
+    scores.push({ link: link, score: score, reason: rejectReason });
     Logger.log('Link ' + i + ': ' + link + ' (total score: ' + score + ')');
   }
   
   // Sort by score descending
   scores.sort(function(a, b) { return b.score - a.score; });
   
-  if (scores[0].score > 0) {
-    Logger.log('Best match: ' + scores[0].link + ' (score: ' + scores[0].score + ')');
+  // CRITICAL: Only accept match with minimum confidence threshold
+  // We need strong validation from at least 1-2 sources to avoid wrong matches
+  var MINIMUM_SCORE = 40; // Lowered: high name similarity (0.8+) now scores ~40 points
+  var CONFIDENT_SCORE = 100; // Has CVR exact match OR multiple strong validations
+  
+  if (scores.length > 0 && scores[0].score >= MINIMUM_SCORE) {
+    var confidence = scores[0].score >= CONFIDENT_SCORE ? 'HIGH' : 'MEDIUM';
+    Logger.log('Best match: ' + scores[0].link + ' (score: ' + scores[0].score + ', confidence: ' + confidence + ')');
+    
+    // Log validation sources for transparency
+    var validations = [];
+    if (cvr && scores[0].score >= 100) validations.push('CVR');
+    if (phone && scores[0].score >= 60) validations.push('Phone');
+    if (companyName) validations.push('Name');
+    if (domain) validations.push('Domain');
+    Logger.log('Validated by: ' + validations.join(' + '));
+    
     return scores[0].link;
   }
   
-  Logger.log('No good match found, using first link: ' + links[0]);
-  return links[0];
+  // If all scores are below threshold, return null (no good match)
+  if (scores.length > 0 && scores[0].score < MINIMUM_SCORE) {
+    Logger.log('All matches scored too low. Best was: ' + scores[0].link + ' (score: ' + scores[0].score + ') - rejecting');
+    return null;
+  }
+  
+  Logger.log('No links found');
+  return null;
+}
+
+/**
+ * Calculate name similarity between two company names (0-1 scale).
+ * @param {string} name1 - First company name
+ * @param {string} name2 - Second company name
+ * @return {number} Similarity score between 0 and 1
+ */
+function calculateNameSimilarity_(name1, name2) {
+  if (!name1 || !name2) return 0;
+  
+  // Normalize: lowercase, remove common suffixes, special chars, trim
+  var normalize = function(name) {
+    return name.toLowerCase()
+      // Decode common HTML entities
+      .replace(/&amp;/g, '&')
+      .replace(/&nbsp;/g, ' ')
+      .replace(/&quot;/g, '"')
+      .replace(/&lt;/g, '<')
+      .replace(/&gt;/g, '>')
+      // Remove company type suffixes
+      .replace(/\s+(a\/s|aps|a\.s\.|as|i\/s|is|ab|ltd|gmbh|holding)\b/gi, '')
+      // Remove common car dealer words
+      .replace(/\s+(biler|auto|bil|cars?)\b/gi, '')
+      // Remove location names (often appear in Proff results)
+      .replace(/\s+(greve|copenhagen|københavn|aarhus|odense|aalborg)\b/gi, '')
+      // Remove special characters (& → and, etc)
+      .replace(/\s*&\s*/g, ' ')  // "Andersen & Martini" → "Andersen Martini"
+      .replace(/[^\w\s]/g, '')   // Remove punctuation
+      .replace(/\s+/g, ' ')      // Normalize whitespace
+      .trim();
+  };
+  
+  var n1 = normalize(name1);
+  var n2 = normalize(name2);
+  
+  Logger.log('Name similarity: "' + n1 + '" vs "' + n2 + '"');
+  
+  // Exact match after normalization
+  if (n1 === n2) {
+    Logger.log('  → Exact match: 1.0');
+    return 1.0;
+  }
+  
+  // Check if one contains the other
+  if (n1.indexOf(n2) !== -1 || n2.indexOf(n1) !== -1) {
+    Logger.log('  → Substring match: 0.85');
+    return 0.85;
+  }
+  
+  // Word overlap (Jaccard similarity)
+  var words1 = n1.split(/\s+/).filter(function(w) { return w.length > 0; });
+  var words2 = n2.split(/\s+/).filter(function(w) { return w.length > 0; });
+  
+  var intersection = 0;
+  for (var i = 0; i < words1.length; i++) {
+    for (var j = 0; j < words2.length; j++) {
+      // Exact word match OR one word contains the other (for abbreviations)
+      if (words1[i] === words2[j] || 
+          words1[i].indexOf(words2[j]) !== -1 || 
+          words2[j].indexOf(words1[i]) !== -1) {
+        intersection++;
+        break;
+      }
+    }
+  }
+  
+  var union = words1.length + words2.length - intersection;
+  if (union === 0) return 0;
+  
+  var jaccard = intersection / union;
+  Logger.log('  → Jaccard: ' + jaccard.toFixed(2) + ' (' + intersection + '/' + union + ' words)');
+  return jaccard;
 }
 
 function cleanProffNumber_(str) {
@@ -3440,7 +3840,7 @@ function checkAutoUncleAdmin_(dealerName, domain) {
       return 'No data - sync required';
     }
     
-    var data = sh.getRange(2, 1, lastRow - 1, 8).getValues(); // ID, Nickname, State, Segment, Depts, Consultant, Created, Products
+    var data = sh.getRange(2, 1, lastRow - 1, 10).getValues(); // ID, Nickname, State, Time in State, Segment, Depts, Consultant, Created, Products, Last Synced
     
     // Normalize function
     var normalize = function(str) {
@@ -3483,6 +3883,7 @@ function checkAutoUncleAdmin_(dealerName, domain) {
       var customerId = row[0];
       var nickname = String(row[1] || '');
       var state = String(row[2] || '');
+      var stateDuration = String(row[3] || '');
       
       if (!nickname) continue;
       
@@ -3570,6 +3971,7 @@ function checkAutoUncleAdmin_(dealerName, domain) {
           matches.push({
             customerId: customerId,
             state: state,
+            stateDuration: stateDuration,
             nickname: nickname,
             score: matchScore + stateScore
           });
@@ -3586,7 +3988,10 @@ function checkAutoUncleAdmin_(dealerName, domain) {
       var link = AU_BASE + '/admin/customers/' + best.customerId;
       var info = best.state || 'Active';
       Logger.log('AutoUncle match found: ' + best.nickname + ' (ID: ' + best.customerId + ', State: ' + best.state + ', Score: ' + best.score + ')');
-      return '✓ ' + info + ': ' + link;
+      return {
+        status: '✓ ' + info + ': ' + link,
+        duration: best.stateDuration || ''
+      };
     }
     
     return 'Not found';
@@ -3651,7 +4056,7 @@ function syncAutoUncleCustomers() {
     sh.clear();
     
     // Set headers
-    var headers = ['ID', 'Nickname', 'State', 'Segment', 'Nr. Departments', 'Digital Consultant', 'Created', 'Enabled Products', 'Last Synced'];
+    var headers = ['ID', 'Nickname', 'State', 'Time in State', 'Segment', 'Nr. Departments', 'Digital Consultant', 'Created', 'Enabled Products', 'Last Synced'];
     sh.getRange(1, 1, 1, headers.length).setValues([headers]);
     sh.setFrozenRows(1);
     
@@ -3663,7 +4068,8 @@ function syncAutoUncleCustomers() {
     ui.alert('Syncing AutoUncle customers...\n\nDette kan tage et øjeblik.');
     
     while (page <= maxPages) {
-      var url = AU_BASE + '/admin/customers?page=' + page;
+      // Add customer_type filter to only get car dealers (excludes marketplaces, etc.)
+      var url = AU_BASE + '/admin/customers?page=' + page + '&q%5Bcustomer_type_eq%5D=car_dealer';
       
       var response = fetchWithJar_({
         url: url,
@@ -3713,6 +4119,7 @@ function syncAutoUncleCustomers() {
           c.id,
           c.nickname,
           c.state,
+          c.stateDuration || '',
           c.segment,
           c.departments,
           c.consultant,
@@ -3777,9 +4184,51 @@ function parseAutoUncleCustomersPage_(html) {
     var segmentMatch = row.match(/<span[^>]+class="label"[^>]*>(A-segment|B-segment|C-segment|D-segment|Oem|Market place|Other)<\/span>/i);
     var segment = segmentMatch ? segmentMatch[1] : '';
     
-    // Extract state
-    var stateMatch = row.match(/<span[^>]+class="label"[^>]*>(Paying customer|Trial|Past customer|Unconfigured|Lead)<\/span>/i);
-    var state = stateMatch ? stateMatch[1] : '';
+    // Extract state - improved to catch any state value
+    // Common states: Paying customer, Trial, Past customer, Unconfigured, Lead, etc.
+    var stateMatch = row.match(/<span[^>]+class="label[^"]*"[^>]*>([^<]+)<\/span>/gi);
+    var state = '';
+    var stateDuration = '';
+    
+    if (stateMatch) {
+      // Find the state label (usually comes before segment, contains "customer", "Trial", "Lead", etc.)
+      for (var s = 0; s < stateMatch.length; s++) {
+        var labelText = stripHtml_(stateMatch[s]).trim();
+        // State labels typically contain these keywords or patterns
+        if (labelText && 
+            (labelText.indexOf('customer') !== -1 || 
+             labelText === 'Trial' || 
+             labelText === 'Lead' ||
+             labelText === 'Unconfigured' ||
+             labelText === 'Churn' ||
+             labelText === 'Inactive' ||
+             labelText.indexOf('Trial') !== -1)) {
+          state = labelText;
+          
+          // Extract state duration - look for text after the state label
+          // Pattern: <span>State</span><br>\n(for|since) X time
+          var tdWithState = '';
+          var tdMatches = row.match(/<td[^>]*>([\s\S]*?)<\/td>/gi);
+          if (tdMatches) {
+            for (var t = 0; t < tdMatches.length; t++) {
+              if (tdMatches[t].indexOf(state) !== -1) {
+                tdWithState = tdMatches[t];
+                break;
+              }
+            }
+          }
+          
+          if (tdWithState) {
+            // Look for duration text after <br>: "for 2 months" or "since over 1 year"
+            var durationMatch = tdWithState.match(/<br>\s*\n?\s*((?:for|since)\s+[^<]+)/i);
+            if (durationMatch) {
+              stateDuration = durationMatch[1].trim();
+            }
+          }
+          break;
+        }
+      }
+    }
     
     // Extract number of departments
     var deptsMatch = row.match(/<td[^>]*>\s*<strong>(\d+)<\/strong>\s*<\/td>/);
@@ -3833,6 +4282,7 @@ function parseAutoUncleCustomersPage_(html) {
       id: customerId,
       nickname: nickname,
       state: state,
+      stateDuration: stateDuration,
       segment: segment,
       departments: departments,
       consultant: consultant,
