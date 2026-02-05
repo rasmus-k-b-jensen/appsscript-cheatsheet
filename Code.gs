@@ -368,19 +368,19 @@ function runMvpForRow_(sh, row) {
   
   // GRUNDDATA (C-E: 3 cols)
   var batchData1 = [[
-    result.cvr || '',                           // C: CVR
-    result.phone || '',                         // D: Telefon
-    result.email || ''                          // E: Email
+    result.cvr || 'N/A',                        // C: CVR
+    result.phone || 'N/A',                      // D: Telefon
+    result.email || 'N/A'                       // E: Email
   ]];
   sh.getRange(row, COL.CVR, 1, 3).setValues(batchData1);
   
   // TEKNOLOGI & PLATFORM (F-J: 5 cols)
   var batchData2 = [[
-    result.websitePlatform || '',               // F: Website Platform
-    result.carDealerPlatform || '',             // G: Bilforhandler Platform
-    result.mobileReady || '',                   // H: Mobile-Ready
-    result.cmpVendors.join(', '),               // I: CMP/Cookie vendor
-    result.chatWidget || ''                     // J: Chat Widget
+    result.websitePlatform || 'N/A',            // F: Website Platform
+    result.carDealerPlatform || 'N/A',          // G: Bilforhandler Platform
+    result.mobileReady || 'N/A',                // H: Mobile-Ready
+    result.cmpVendors.join(', ') || 'N/A',      // I: CMP/Cookie vendor
+    result.chatWidget || 'N/A'                  // J: Chat Widget
   ]];
   sh.getRange(row, COL.WEBSITE_PLATFORM, 1, 5).setValues(batchData2);
   
@@ -389,57 +389,63 @@ function runMvpForRow_(sh, row) {
     ga4Status,                                  // K: GA4
     ga4IdsDisplay,                              // L: GA4 IDs
     result.gtmIds.length ? 'Yes' : 'No',       // M: GTM
-    result.gtmIds.join(', '),                  // N: GTM IDs
+    result.gtmIds.join(', ') || 'N/A',         // N: GTM IDs
     result.metaPixelIds.length ? 'Yes' : 'No', // O: Meta Pixel
-    result.metaPixelIds.join(', '),            // P: Meta Pixel IDs
+    result.metaPixelIds.join(', ') || 'N/A',   // P: Meta Pixel IDs
     result.awIds.length ? 'Yes' : 'No'         // Q: Google Ads tag
   ]];
   sh.getRange(row, COL.GA4, 1, 7).setValues(batchData3);
   
   // MARKETING TOOLS (R-U: 4 cols)
   var batchData4 = [[
-    result.awIds.join(', '),                   // R: Google Ads AW IDs
-    result.emailPlatform || '',                 // S: Email Platform
-    result.contactForms || '',                  // T: Kontaktformularer
-    result.hasBlog || ''                        // U: Blog
+    result.awIds.join(', ') || 'N/A',          // R: Google Ads AW IDs
+    result.emailPlatform || 'N/A',              // S: Email Platform
+    result.contactForms || 'N/A',               // T: Kontaktformularer
+    result.hasBlog || 'N/A'                     // U: Blog
   ]];
   sh.getRange(row, COL.GOOGLE_ADS_AW_IDS, 1, 4).setValues(batchData4);
   
   // BUSINESS DATA - Proff.dk (V-Y: 4 cols)
   var proffData = scrapeProffData_(result.cvr, domain);
-  sh.getRange(row, COL.PROFF_LINK).setValue(proffData.proffUrl);  // V: Proff link
+  sh.getRange(row, COL.PROFF_LINK).setValue(proffData.proffUrl || 'N/A');  // V: Proff link
   
   if (proffData.revenue) {
     sh.getRange(row, COL.REVENUE).setValue(proffData.revenue).setNumberFormat('@STRING@');  // W: Omsætning
+  } else {
+    sh.getRange(row, COL.REVENUE).setValue('N/A');
   }
   if (proffData.profit) {
     sh.getRange(row, COL.PROFIT).setValue(proffData.profit).setNumberFormat('@STRING@');   // X: Resultat
+  } else {
+    sh.getRange(row, COL.PROFIT).setValue('N/A');
   }
   if (proffData.employees) {
     sh.getRange(row, COL.EMPLOYEES).setValue(proffData.employees);  // Y: Ansatte
+  } else {
+    sh.getRange(row, COL.EMPLOYEES).setValue('N/A');
   }
   
   // KONKURRENCE & SOCIAL (Z-AB: 3 cols)
   var batchData5 = [[
-    result.competitors.join(', '),              // Z: Competitors
-    result.socialMedia.join(', '),              // AA: Social Media
-    result.adPlatforms.join(', ')               // AB: Ad Platforms
+    result.competitors.join(', ') || 'N/A',     // Z: Competitors
+    result.socialMedia.join(', ') || 'N/A',     // AA: Social Media
+    result.adPlatforms.join(', ') || 'N/A'      // AB: Ad Platforms
   ]];
   sh.getRange(row, COL.COMPETITORS, 1, 3).setValues(batchData5);
   
   // MEDIA & INDHOLD (AC-AF: 4 cols)
   var batchData6 = [[
-    result.videoMarketing || '',                // AC: Video Marketing
-    result.carBrands || '',                     // AD: Bilmærker
-    result.trustpilot || '',                    // AE: Trustpilot Rating
-    result.carMarketplaces || ''                // AF: Bil Salgsplatforme
+    result.videoMarketing || 'N/A',             // AC: Video Marketing
+    result.carBrands || 'N/A',                  // AD: Bilmærker
+    result.trustpilot || 'N/A',                 // AE: Trustpilot Rating
+    result.carMarketplaces || 'N/A'             // AF: Bil Salgsplatforme
   ]];
   sh.getRange(row, COL.VIDEO_MARKETING, 1, 4).setValues(batchData6);
   
   // METADATA (AG-AM: 7 cols) - AG (Pages scanned), AH (Last run), skip AI (35) and AJ (36), AK (AutoUncle Admin), AL (Bilinfo Antal), AM (Afdelinger Bilinfo)
   sh.getRange(row, COL.PAGES_SCANNED, 1, 1).setValues([[result.pagesScanned.join(' | ')]]);  // AG: Pages scanned
   sh.getRange(row, COL.LAST_RUN, 1, 1).setValues([[new Date()]]);                        // AH: Last run
-  sh.getRange(row, COL.AUTOUCLE_ADMIN, 1, 1).setValues([[result.autoUncleStatus || '']]);     // AK: AutoUncle Admin
+  sh.getRange(row, COL.AUTOUCLE_ADMIN, 1, 1).setValues([[result.autoUncleStatus || 'N/A']]);     // AK: AutoUncle Admin
   
   // AL & AM: Bilinfo Antal + Afdelinger - Fetch from Bilinfo API
   Logger.log('Attempting to fetch Bilinfo data for domain: ' + domain);
