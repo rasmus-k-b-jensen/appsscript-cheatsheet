@@ -3474,6 +3474,9 @@ function checkAutoUncleAdmin_(dealerName, domain) {
       }
     }
     
+    // Track all matches with scores
+    var matches = [];
+    
     // Search through customers
     for (var i = 0; i < data.length; i++) {
       var row = data[i];
@@ -3496,19 +3499,34 @@ function checkAutoUncleAdmin_(dealerName, domain) {
         var searchWords = searchTerm.split(/[\s.-]+/).filter(function(w) { return w.length > 2; });
         
         var matched = false;
+        var matchScore = 0;
         
-        // Method 1: Direct substring match
-        if (nicknameLower.indexOf(searchTerm) !== -1 || searchTerm.indexOf(nicknameLower) !== -1) {
+        // Method 1: Direct exact match (highest score)
+        if (nicknameLower === searchTerm || searchTerm === nicknameLower) {
           matched = true;
+          matchScore = 100;
         }
         
-        // Method 2: Match without spaces (lindholmbiler vs lindholm biler)
+        // Method 2: Exact match without spaces
+        if (!matched && nicknameNoSpaces === searchTermNoSpaces) {
+          matched = true;
+          matchScore = 90;
+        }
+        
+        // Method 3: Direct substring match
+        if (!matched && (nicknameLower.indexOf(searchTerm) !== -1 || searchTerm.indexOf(nicknameLower) !== -1)) {
+          matched = true;
+          matchScore = 70;
+        }
+        
+        // Method 4: Match without spaces (substring)
         if (!matched && (nicknameNoSpaces.indexOf(searchTermNoSpaces) !== -1 || 
                          searchTermNoSpaces.indexOf(nicknameNoSpaces) !== -1)) {
           matched = true;
+          matchScore = 60;
         }
         
-        // Method 3: Word-based matching (at least 2 words match)
+        // Method 5: Word-based matching (at least 2 words match)
         if (!matched && searchWords.length >= 2 && nicknameWords.length >= 2) {
           var matchCount = 0;
           for (var sw = 0; sw < searchWords.length; sw++) {
@@ -3521,28 +3539,54 @@ function checkAutoUncleAdmin_(dealerName, domain) {
               }
             }
           }
-          if (matchCount >= 2) matched = true;
+          if (matchCount >= 2) {
+            matched = true;
+            matchScore = 40;
+          }
         }
         
-        // Method 4: Single significant word match (for short names)
+        // Method 6: Single significant word match (for short names)
         if (!matched && searchWords.length === 1 && nicknameWords.length >= 1) {
           for (var nw = 0; nw < nicknameWords.length; nw++) {
             if (searchWords[0] === nicknameWords[nw] || 
                 (searchWords[0].length > 4 && nicknameWords[nw].indexOf(searchWords[0]) !== -1) ||
                 (nicknameWords[nw].length > 4 && searchWords[0].indexOf(nicknameWords[nw]) !== -1)) {
               matched = true;
+              matchScore = 30;
               break;
             }
           }
         }
         
         if (matched) {
-          // Found a match!
-          var link = AU_BASE + '/admin/customers/' + customerId;
-          var info = state || 'Active';
-          return '✓ ' + info + ': ' + link;
+          // Add state bonus (prioritize better states)
+          var stateScore = 0;
+          if (state === 'Paying customer') stateScore = 50;
+          else if (state === 'Trial') stateScore = 30;
+          else if (state === 'Past customer') stateScore = 20;
+          else if (state === 'Lead') stateScore = 10;
+          // Unconfigured gets 0
+          
+          matches.push({
+            customerId: customerId,
+            state: state,
+            nickname: nickname,
+            score: matchScore + stateScore
+          });
         }
       }
+    }
+    
+    // Sort matches by score (descending)
+    if (matches.length > 0) {
+      matches.sort(function(a, b) { return b.score - a.score; });
+      
+      // Return best match
+      var best = matches[0];
+      var link = AU_BASE + '/admin/customers/' + best.customerId;
+      var info = best.state || 'Active';
+      Logger.log('AutoUncle match found: ' + best.nickname + ' (ID: ' + best.customerId + ', State: ' + best.state + ', Score: ' + best.score + ')');
+      return '✓ ' + info + ': ' + link;
     }
     
     return 'Not found';
